@@ -42,7 +42,7 @@ from sglang.multimodal_gen.runtime.utils.hf_diffusers_utils import (
     maybe_download_model,
     verify_model_config_and_directory,
 )
-from sglang.multimodal_gen.runtime.utils.component_residency import (
+from sglang.multimodal_gen.runtime.managers.component_residency import (
     PipelineResidencyManager,
 )
 from sglang.multimodal_gen.runtime.utils.logging_utils import init_logger

@@ -55,7 +55,7 @@ from sglang.multimodal_gen.runtime.loader.weight_utils import (
 )
 from sglang.multimodal_gen.runtime.pipelines.diffusers_pipeline import DiffusersPipeline
 from sglang.multimodal_gen.runtime.utils.hf_diffusers_utils import maybe_download_model
-from sglang.multimodal_gen.runtime.utils.layerwise_offload import OffloadableDiTMixin
+from sglang.multimodal_gen.runtime.managers.layerwise_offload import OffloadableDiTMixin
 from sglang.multimodal_gen.runtime.utils.logging_utils import init_logger
 
 logger = init_logger(__name__)

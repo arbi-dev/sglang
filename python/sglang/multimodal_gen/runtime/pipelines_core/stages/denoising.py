@@ -87,13 +87,13 @@ from sglang.multimodal_gen.runtime.post_training.rollout_denoising_mixin import 
     RolloutDenoisingMixin,
 )
 from sglang.multimodal_gen.runtime.server_args import ServerArgs
-from sglang.multimodal_gen.runtime.utils.component_residency import (
+from sglang.multimodal_gen.runtime.managers.component_residency import (
     ComponentUse,
     SequentialComponent,
     SequentialComponentGroup,
     build_dit_residency_strategy,
 )
-from sglang.multimodal_gen.runtime.utils.layerwise_offload import OffloadableDiTMixin
+from sglang.multimodal_gen.runtime.managers.layerwise_offload import OffloadableDiTMixin
 from sglang.multimodal_gen.runtime.utils.logging_utils import init_logger
 from sglang.multimodal_gen.runtime.utils.perf_logger import StageProfiler
 from sglang.multimodal_gen.runtime.utils.profiler import SGLDiffusionProfiler
