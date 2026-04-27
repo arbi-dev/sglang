@@ -30,6 +30,7 @@ from sglang.srt.mem_cache.unified_cache_components import (
     CacheTransferPhase,
     ComponentData,
     ComponentType,
+    DeepSeekV4CompressedComponent,
     EvictLayer,
     FullComponent,
     MambaComponent,
@@ -189,6 +190,7 @@ COMPONENT_REGISTRY: dict[ComponentType, type[TreeComponent]] = {
     ComponentType.FULL: FullComponent,
     ComponentType.MAMBA: MambaComponent,
     ComponentType.SWA: SWAComponent,
+    ComponentType.DSV4_COMPRESSED: DeepSeekV4CompressedComponent,
 }
 
 logger = logging.getLogger(__name__)
@@ -210,6 +212,7 @@ class UnifiedRadixCache(BasePrefixCache):
         else:
             self.device = torch.device("cpu")
 
+        self.metrics_collector = None
         if params.enable_metrics:
             self.init_metrics_collector()
 
@@ -240,11 +243,67 @@ class UnifiedRadixCache(BasePrefixCache):
         self.cache_controller = None
         self.write_through_threshold = 256
 
+        self._reset_full()
         self.reset()
         logger.info(f"Init Unified RadixTree with components {self.tree_components}")
 
     def reset(self) -> None:
         self._reset_full()
+
+    def _reset_l1_only(self) -> None:
+        # TODO: This is a temporary method for debugging L2 HiCache, will be removed
+        # 1. Drain pending async operations
+        self.writing_check(write_back=True)
+        if self.cache_controller is not None:
+            self.cache_controller.ack_write_queue.clear()
+            self.cache_controller.ack_load_queue.clear()
+            self.cache_controller.write_queue.clear()
+            self.cache_controller.load_queue.clear()
+        self.ongoing_write_through.clear()
+        self.ongoing_load_back.clear()
+
+        # 2. Walk tree: release all device resources, keep component host_values
+        stack = [self.root_node]
+        while stack:
+            node = stack.pop()
+            for ct in self.tree_components:
+                cd = node.component_data[ct]
+                if node is not self.root_node:
+                    cd.value = None  # Release device reference
+                cd.lock_ref = 1 if node is self.root_node else 0
+                # cd.host_value / cd.host_lock_ref are preserved
+            stack.extend(node.children.values())
+        pruned_nodes = self._prune_l1_only_leaves_after_reset()
+
+        # Root keeps its empty-list value marker
+        self.root_node.component_data[BASE_COMPONENT_TYPE].value = []
+
+        # 3. Reset bookkeeping
+        self.component_evictable_size_ = {ct: 0 for ct in self.tree_components}
+        self.component_protected_size_ = {ct: 0 for ct in self.tree_components}
+        self.lru_lists = {
+            ct: UnifiedLRUList(ct, self.tree_components) for ct in self.tree_components
+        }
+
+        # 4. Reset device leaf set
+        self.evictable_device_leaves.clear()
+
+        # 5. Rebuild host leaf sets (all non-root backuped nodes are now evictable host leaves)
+        self.evictable_host_leaves = set()
+        self._rebuild_host_leaf_sets()
+
+        # 6. Rebuild host LRU lists for extra components
+        self.host_lru_lists = {
+            ct: UnifiedLRUList(ct, self.tree_components, use_host_ptr=True)
+            for ct in self.tree_components
+        }
+        self._rebuild_host_lru_lists()
+
+        logger.info(
+            "UnifiedRadixCache L1-only reset completed: "
+            "tree structure and L2 host data preserved, pruned_l1_only_nodes=%d",
+            pruned_nodes,
+        )
 
     def _reset_full(self) -> None:
         """Full reset: destroy entire tree and all state."""
@@ -401,6 +460,7 @@ class UnifiedRadixCache(BasePrefixCache):
                 req.req_pool_idx, :kv_committed_len
             ]
             self.token_to_kv_pool_allocator.free(kv_indices)
+            self.req_to_token_pool.free(req.req_pool_idx)
             for comp in self._components_tuple:
                 comp.cleanup_after_caching_req(req, is_finished=True)
             return
@@ -454,6 +514,9 @@ class UnifiedRadixCache(BasePrefixCache):
             req.last_node,
             DecLockRefParams(swa_uuid_for_lock=getattr(req, "swa_uuid_for_lock", None)),
         )
+
+        # Free the req slot
+        self.req_to_token_pool.free(req.req_pool_idx)
 
         # cleanup
         for comp in self._components_tuple:
@@ -1295,7 +1358,9 @@ class UnifiedRadixCache(BasePrefixCache):
                 for _, finish_event, ack_list in cc.ack_write_queue:
                     finish_event.synchronize()
                     for ack_id in ack_list:
-                        self.ongoing_write_through.pop(ack_id, None)
+                        node = self.ongoing_write_through.pop(ack_id, None)
+                        if node is not None:
+                            self.dec_lock_ref(node)
                 cc.ack_write_queue.clear()
                 assert len(self.ongoing_write_through) == 0
             return
@@ -1326,7 +1391,7 @@ class UnifiedRadixCache(BasePrefixCache):
                 self.dec_lock_ref(node)
             finish_count -= 1
 
-    def loading_check(self) -> None:
+    def loading_check(self, blocking: bool = False) -> None:
         """Poll load-back completions."""
         cc = self.cache_controller
         if cc is None or not self.ongoing_load_back:
@@ -1334,7 +1399,10 @@ class UnifiedRadixCache(BasePrefixCache):
         finish_count = 0
         for _, finish_event, ack_list in cc.ack_load_queue:
             if not finish_event.query():
-                break
+                if blocking:
+                    finish_event.synchronize()
+                else:
+                    break
             finish_count += 1
             for ack_id in ack_list:
                 node = self.ongoing_load_back.pop(ack_id)
@@ -1345,10 +1413,21 @@ class UnifiedRadixCache(BasePrefixCache):
 
     def init_load_back(
         self,
-        params: InitLoadBackParams,
+        params_or_node,
+        host_hit_length: int = 0,
     ) -> tuple[torch.Tensor, UnifiedTreeNode]:
         """Prepare KV cache loading from host to device.
-        Returns (device_indices, last_node) tuple."""
+        Returns (device_indices, last_node) tuple.
+
+        Accepts either InitLoadBackParams or (last_host_node, host_hit_length).
+        """
+        if isinstance(params_or_node, InitLoadBackParams):
+            params = params_or_node
+        else:
+            params = InitLoadBackParams(
+                last_host_node=params_or_node,
+                host_hit_length=host_hit_length,
+            )
         last_node = params.last_host_node
         mem_quota = params.mem_quota
         req = params.req
@@ -1827,3 +1906,31 @@ class UnifiedRadixCache(BasePrefixCache):
                     if cd.host_value is not None:
                         self.host_lru_lists[ct].insert_mru(node)
             stack.extend(node.children.values())
+
+    def _prune_l1_only_leaves_after_reset(self) -> int:
+        """Drop suffix nodes that lost L1 device data and have no L2 Full data."""
+        postorder = []
+        stack = [self.root_node]
+        while stack:
+            node = stack.pop()
+            postorder.append(node)
+            stack.extend(node.children.values())
+
+        pruned = 0
+        for node in reversed(postorder):
+            if node is self.root_node or node.children:
+                continue
+            if node.component_data[BASE_COMPONENT_TYPE].host_value is not None:
+                continue
+
+            for comp in self._components_tuple:
+                if comp.node_has_component_data(node, target=EvictLayer.HOST):
+                    self._evict_component_and_detach_lru(
+                        node, comp, target=EvictLayer.HOST
+                    )
+            self.evictable_device_leaves.discard(node)
+            self.evictable_host_leaves.discard(node)
+            self._remove_leaf_from_parent(node)
+            pruned += 1
+
+        return pruned

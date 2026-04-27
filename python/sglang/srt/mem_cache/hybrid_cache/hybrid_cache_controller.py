@@ -70,6 +70,9 @@ class CacheOperation(BaseCacheOperation):
                 host_indices=cat_or_none(t.host_indices for t in ts),
                 device_indices=cat_or_none(t.device_indices for t in ts),
                 keys=[k for t in ts if t.keys for k in t.keys] or None,
+                hit_policy=ts[0].hit_policy,
+                swa_suffix_tokens=sum(t.swa_suffix_tokens for t in ts),
+                device_indices_source=ts[0].device_indices_source,
             )
             for name, ts in grouped.items()
         ]
@@ -309,6 +312,12 @@ class HybridCacheController(BaseHiCacheController):
         if not need_load_kv:
             device_indices = torch.empty((0,), dtype=torch.int64, device=self.device)
         elif swa_xfer is not None:
+            if len(swa_xfer.host_indices) != swa_xfer.swa_suffix_tokens:
+                raise ValueError(
+                    "SWA loadback host indices must match swa_suffix_tokens, "
+                    f"got len(host_indices)={len(swa_xfer.host_indices)} and "
+                    f"swa_suffix_tokens={swa_xfer.swa_suffix_tokens}"
+                )
             result = self.mem_pool_device_allocator.alloc_full_with_suffix_swa(
                 len(host_indices), swa_xfer.swa_suffix_tokens
             )
@@ -492,6 +501,7 @@ class HybridCacheController(BaseHiCacheController):
                         keys=transfer.keys,
                         hit_policy=transfer.hit_policy,
                         swa_suffix_tokens=transfer.swa_suffix_tokens,
+                        device_indices_source=transfer.device_indices_source,
                     )
                 )
         return host_indices, device_indices, resolved_pool_transfers
@@ -519,7 +529,7 @@ class HybridCacheController(BaseHiCacheController):
     def _resolve_shared_pool_transfers(self, operation):
         for transfer in operation.pool_transfers:
             entry = self.mem_pool_host.entry_map.get(transfer.name)
-            if entry.share_indices_with_anchor:
+            if entry is not None and entry.share_indices_with_anchor:
                 transfer.keys = operation.hash_value
                 transfer.host_indices = operation.host_indices
 
@@ -553,7 +563,8 @@ class HybridCacheController(BaseHiCacheController):
         """Auto-alloc host or device indices for PoolTransfers where they are None."""
         if not extra_pools:
             return None
-        newly_allocated: list[tuple[PoolTransfer, Any, torch.Tensor]] = []
+        allocated: dict[PoolName, tuple[PoolTransfer, Any]] = {}
+        deferred: list[tuple[PoolTransfer, PoolName]] = []
         for pool in extra_pools:
             entry = self.mem_pool_host.entry_map.get(pool.name)
             if entry is None:
@@ -562,38 +573,61 @@ class HybridCacheController(BaseHiCacheController):
                 pool.device_indices = kv_device_indices
                 pool.host_indices = kv_host_indices
                 continue
+            if entry.derive_indices_from_pool:
+                deferred.append((pool, entry.derive_indices_from_pool))
+                continue
+            
+            need_alloc = True
             if alloc_host:
-                if pool.host_indices is not None or pool.device_indices is None:
+                if pool.device_indices is None:
                     continue
-                entry_pool, evict_fn, size = (
+                entry_pool, evict_fn, size, need_alloc = (
                     entry.host_pool,
                     entry.host_evict_fn,
                     len(pool.device_indices),
+                    pool.host_indices is None,
                 )
             else:
-                if pool.device_indices is not None or pool.host_indices is None:
+                if pool.host_indices is None:
                     continue
-                entry_pool, evict_fn, size = (
+                entry_pool, evict_fn, size, need_alloc = (
                     entry.device_pool,
                     entry.device_evict_fn,
                     len(pool.host_indices),
+                    pool.device_indices is None,
                 )
-            indices = entry_pool.alloc(size)
-            if indices is None and evict_fn:
-                evict_fn(size)
+            
+            if need_alloc:
                 indices = entry_pool.alloc(size)
-            if indices is None:
-                # Roll back all previous allocations using each pool's own entry_pool.
-                for prev_pool, prev_entry_pool, prev_indices in newly_allocated:
-                    prev_entry_pool.free(prev_indices)
-                    if alloc_host:
-                        prev_pool.host_indices = None
-                    else:
-                        prev_pool.device_indices = None
-                return None
-            if alloc_host:
-                pool.host_indices = indices
+                if indices is None and evict_fn:
+                    evict_fn(size)
+                    indices = entry_pool.alloc(size)
+                if indices is None:
+                    for prev_pool, prev_entry_pool in allocated.values():
+                        if prev_entry_pool is None:
+                            continue
+                        if alloc_host:
+                            prev_entry_pool.free(prev_pool.host_indices)
+                            prev_pool.host_indices = None
+                        else:
+                            prev_entry_pool.free(prev_pool.device_indices)
+                            prev_pool.device_indices = None
+                    return None
+                if alloc_host:
+                    pool.host_indices = indices
+                else:
+                    pool.device_indices = indices
+
+            allocated[pool.name] = (pool, entry_pool)
+
+        # Assign indices to deferred pools from their source.
+        for pool, source_name in deferred:
+            if source_name == PoolName.KV:
+                pool.host_indices = kv_host_indices
+                pool.device_indices = kv_device_indices
             else:
-                pool.device_indices = indices
-            newly_allocated.append((pool, entry_pool, indices))
+                src_pool, _ = allocated.get(source_name, (None, None))
+                if src_pool is not None:
+                    pool.host_indices = src_pool.host_indices
+                    pool.device_indices = src_pool.device_indices
         return extra_pools
