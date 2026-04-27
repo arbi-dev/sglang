@@ -93,7 +93,7 @@ class VideoGenerationsRequest(BaseModel):
     size: Optional[str] = ""
     fps: Optional[int] = None
     num_frames: Optional[int] = None
-    seed: Optional[Union[int, List[int]]] = 42
+    seed: Optional[Union[int, List[int]]] = None
     generator_device: Optional[str] = "cuda"
     # SGLang extensions
     width: Optional[int] = None
