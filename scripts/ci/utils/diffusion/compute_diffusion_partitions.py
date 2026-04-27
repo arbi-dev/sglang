@@ -11,7 +11,6 @@ import json
 import math
 import os
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 
 from diffusion_case_parser import (
@@ -21,20 +20,10 @@ from diffusion_case_parser import (
     collect_diffusion_suites,
     resolve_case_config_path,
 )
+from partitioning import PartitionItem, partition_items_by_lpt
 
-SUITE_OUTPUT_NAMES = {
-    "1-gpu": "1gpu",
-    "2-gpu": "2gpu",
-}
+SUITE_OUTPUT_NAMES = {"1-gpu": "1gpu", "2-gpu": "2gpu"}
 DEFAULT_STANDALONE_EST_TIME_SECONDS = 300.0
-
-
-@dataclass(frozen=True)
-class PartitionItem:
-    kind: str
-    item_id: str
-    est_time: float
-    used_fallback_estimate: bool = False
 
 
 def validate_suite_case_coverage(suites: dict[str, DiffusionSuiteInfo]) -> None:
@@ -104,27 +93,6 @@ def build_partition_items(suite_info: DiffusionSuiteInfo) -> list[PartitionItem]
         for standalone_file in suite_info.standalone_files
     )
     return items
-
-
-def lpt_partition(
-    items: list[PartitionItem], num_partitions: int
-) -> list[list[PartitionItem]]:
-    if not items or num_partitions <= 0:
-        return []
-
-    sorted_items = sorted(
-        items,
-        key=lambda item: (-item.est_time, item.kind, item.item_id),
-    )
-    partitions: list[list[PartitionItem]] = [[] for _ in range(num_partitions)]
-    partition_sums = [0.0] * num_partitions
-
-    for item in sorted_items:
-        min_idx = partition_sums.index(min(partition_sums))
-        partitions[min_idx].append(item)
-        partition_sums[min_idx] += item.est_time
-
-    return partitions
 
 
 def build_matrix(partition_count: int) -> dict:
@@ -290,7 +258,7 @@ def main():
             max_time_seconds=args.max_time,
             max_partitions=args.max_partitions,
         )
-        partitions = lpt_partition(items, partition_count)
+        partitions = partition_items_by_lpt(items, partition_count)
 
         print_suite_summary(suite_name, suite_info, partitions)
 

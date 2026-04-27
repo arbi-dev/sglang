@@ -16,13 +16,15 @@ import os
 import sys
 from pathlib import Path
 
+from partitioning import PartitionItem, partition_items_by_lpt
+
 from sglang.multimodal_gen.runtime.utils.logging_utils import init_logger
 from sglang.multimodal_gen.test.run_suite import (
     SUITES,
     _maybe_pin_update_weights_model_pair,
     collect_test_items,
+    get_case_est_time,
     get_suite_files_rel,
-    partition_items_by_index,
     run_pytest,
 )
 
@@ -135,11 +137,23 @@ def main():
         logger.warning(f"No test items found for suite '{args.suite}'.")
         sys.exit(0)
 
-    # Partition by test items (same as run_suite.py)
+    # Partition by test items with the same LPT strategy used by CI partitioning.
     partition_id = args.partition_id if args.partition_id is not None else 0
     total_partitions = args.total_partitions if args.total_partitions is not None else 1
 
-    my_items = partition_items_by_index(all_test_items, partition_id, total_partitions)
+    partition_items = []
+    for item in all_test_items:
+        case_id = item[item.index("[") + 1 : item.rindex("]")]
+        partition_items.append(
+            PartitionItem(
+                kind="case",
+                item_id=item,
+                est_time=get_case_est_time(case_id),
+            )
+        )
+
+    partitions = partition_items_by_lpt(partition_items, total_partitions)
+    my_items = [item.item_id for item in partitions[partition_id]]
 
     logger.info(
         f"Partition {partition_id}/{total_partitions}: "

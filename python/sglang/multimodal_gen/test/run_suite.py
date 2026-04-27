@@ -19,6 +19,14 @@ from pathlib import Path
 
 import tabulate
 
+DIFFUSION_UTILS_DIR = (
+    Path(__file__).resolve().parents[5] / "scripts" / "ci" / "utils" / "diffusion"
+)
+if str(DIFFUSION_UTILS_DIR) not in sys.path:
+    sys.path.insert(0, str(DIFFUSION_UTILS_DIR))
+
+from partitioning import PartitionItem, partition_items_by_lpt
+
 from sglang.multimodal_gen.runtime.utils.logging_utils import init_logger
 from sglang.multimodal_gen.test.server.gpu_cases import (
     ONE_GPU_CASES,
@@ -177,16 +185,15 @@ def auto_partition(
     if not cases or size <= 0:
         return []
 
-    sorted_cases = sorted(cases, key=lambda c: get_case_est_time(c.id), reverse=True)
-    partitions: list[list[DiffusionTestCase]] = [[] for _ in range(size)]
-    partition_sums = [0.0] * size
-
-    for case in sorted_cases:
-        min_idx = partition_sums.index(min(partition_sums))
-        partitions[min_idx].append(case)
-        partition_sums[min_idx] += get_case_est_time(case.id)
-
-    return partitions[rank] if rank < size else []
+    case_by_id = {case.id: case for case in cases}
+    items = [
+        PartitionItem(kind="case", item_id=case.id, est_time=get_case_est_time(case.id))
+        for case in cases
+    ]
+    partitions = partition_items_by_lpt(items, size)
+    if rank >= len(partitions):
+        return []
+    return [case_by_id[item.item_id] for item in partitions[rank]]
 
 
 def get_suite_files_rel(suite: str, parametrized_only: bool = False) -> list[str]:
