@@ -62,6 +62,8 @@ from sglang.multimodal_gen.runtime.loader.component_loaders.transformer_loader i
 )
 from sglang.multimodal_gen.runtime.managers.component_manager import (
     ComponentUse,
+    DIT_FORWARD_ACCESS,
+    DIT_SWITCH_GROUP,
 )
 from sglang.multimodal_gen.runtime.managers.forward_context import set_forward_context
 from sglang.multimodal_gen.runtime.pipelines_core.schedule_batch import Req
@@ -948,7 +950,7 @@ class DenoisingStage(PipelineStage, RolloutDenoisingMixin):
             )
 
         if self._component_residency_manager is not None:
-            self._component_residency_manager.finish_active_use("dit_forward")
+            self._component_residency_manager.finish_switch_group(DIT_SWITCH_GROUP)
 
     def _preprocess_sp_latents(self, batch: Req, server_args: ServerArgs):
         """Shard latents for Sequence Parallelism if applicable."""
@@ -1028,22 +1030,24 @@ class DenoisingStage(PipelineStage, RolloutDenoisingMixin):
         batch: Req,
     ) -> None:
         """
-            manage dit's residency by switching the use
+        manage dit's residency by switching the use
+        Args:
+            current_model: the next active dit, transformer_1 or transformer_2
         """
         manager = self._component_residency_manager
         if manager is None:
             return
 
         component_name = manager.component_name_for_module(current_model, current_phase)
-        phase = str(getattr(batch, "extra", {}).get("ltx2_phase", current_phase))
+        phase = str(batch.extra.get("ltx2_phase", current_phase))
         use = ComponentUse(
             stage_name=manager.state.stage_name or self.__class__.__name__,
             component_name=component_name,
-            access_kind="dit_forward",
+            access_kind=DIT_FORWARD_ACCESS,
             phase=phase,
-            preferred_after_request=component_name == "transformer",
+            preferred_ready_after_request=component_name == "transformer",
         )
-        manager.switch_use(use, group_key="dit_forward")
+        manager.switch_use(use, switch_group=DIT_SWITCH_GROUP)
 
     def _select_and_manage_model(
         self,

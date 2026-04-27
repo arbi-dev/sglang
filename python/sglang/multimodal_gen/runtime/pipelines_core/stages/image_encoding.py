@@ -102,6 +102,17 @@ class ImageEncodingStage(PipelineStage):
             if processor and hasattr(processor, "to"):
                 setattr(self, field, processor.to(device))
 
+    def _manage_component_use(self, component_name: str) -> None:
+        manager = self._component_residency_manager
+        if manager is None:
+            return
+        manager.before_use(
+            ComponentUse(
+                manager.state.stage_name or self.__class__.__name__,
+                component_name,
+            )
+        )
+
     def encoding_qwen_image_edit(self, outputs, image_inputs):
         # encoder hidden state
         prompt_embeds = qwen_image_postprocess_text(outputs, image_inputs, 64)
@@ -159,6 +170,8 @@ class ImageEncodingStage(PipelineStage):
 
             if self.image_encoder:
                 # if an image encoder is provided
+                self._manage_component_use("image_encoder")
+                self._manage_component_use("text_encoder")
                 with set_forward_context(current_timestep=0, attn_metadata=None):
                     outputs = self.image_encoder(
                         **image_inputs,

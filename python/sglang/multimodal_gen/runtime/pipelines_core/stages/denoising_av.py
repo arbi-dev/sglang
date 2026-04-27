@@ -2,6 +2,7 @@ import torch
 from diffusers.utils.torch_utils import randn_tensor
 
 from sglang.multimodal_gen.configs.pipeline_configs.ltx_2 import is_ltx23_native_variant
+from sglang.multimodal_gen.runtime.managers.component_manager import DIT_SWITCH_GROUP
 from sglang.multimodal_gen.runtime.pipelines_core.diffusion_scheduler_utils import (
     clone_scheduler_runtime,
 )
@@ -82,22 +83,8 @@ class LTX2AVDenoisingStage(LTX2DenoisingStage):
             batch.latents = latents
             batch.audio_latents = audio_latents
 
-        pipeline = self.pipeline() if self.pipeline else None
-        current_phase = (
-            str(getattr(batch, "extra", {}).get("ltx2_phase", ""))
-            if hasattr(batch, "extra")
-            else ""
-        )
-        release_phase_state = (
-            getattr(pipeline, "release_ltx2_phase_state", None)
-            if pipeline is not None
-            else None
-        )
-        if callable(release_phase_state):
-            release_phase_state(current_phase)
-
         if self._component_residency_manager is not None:
-            self._component_residency_manager.finish_active_use("dit_forward")
+            self._component_residency_manager.finish_switch_group(DIT_SWITCH_GROUP)
 
 
 class LTX2RefinementStage(LTX2AVDenoisingStage):
@@ -216,14 +203,6 @@ class LTX2RefinementStage(LTX2AVDenoisingStage):
     def forward(self, batch: Req, server_args: ServerArgs) -> Req:
         """Run the distilled refinement schedule on top of the shared AV denoiser."""
         batch.extra["ltx2_phase"] = "stage2"
-        pipeline = self.pipeline() if self.pipeline else None
-        ensure_phase_ready = (
-            getattr(pipeline, "ensure_ltx2_phase_ready", None)
-            if pipeline is not None
-            else None
-        )
-        if callable(ensure_phase_ready):
-            ensure_phase_ready("stage2")
         original_clean_latent_background = getattr(
             batch, "ltx2_ti2v_clean_latent_background", None
         )

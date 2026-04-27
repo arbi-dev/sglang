@@ -13,7 +13,10 @@ import torch
 
 from sglang.multimodal_gen.configs.models.encoders import BaseEncoderOutput
 from sglang.multimodal_gen.runtime.distributed import get_local_torch_device
-from sglang.multimodal_gen.runtime.managers.component_manager import ComponentUse
+from sglang.multimodal_gen.runtime.managers.component_manager import (
+    ComponentUse,
+    FORWARD_ACCESS,
+)
 from sglang.multimodal_gen.runtime.managers.forward_context import set_forward_context
 from sglang.multimodal_gen.runtime.pipelines_core.schedule_batch import Req
 from sglang.multimodal_gen.runtime.pipelines_core.stages.base import PipelineStage
@@ -55,7 +58,7 @@ class TextEncodingStage(PipelineStage):
             ComponentUse(
                 stage_name=stage_name,
                 component_name="text_encoder" if i == 0 else f"text_encoder_{i + 1}",
-                preferred_after_request=i == 0,
+                preferred_ready_after_request=i == 0,
             )
             for i in range(len(self.text_encoders))
         ]
@@ -146,6 +149,22 @@ class TextEncodingStage(PipelineStage):
         tok_kwargs = tokenizer_kwargs | kwargs
 
         return tok_kwargs
+
+    def _manage_text_encoder_use(self, encoder_index: int) -> None:
+        manager = self._component_residency_manager
+        if manager is None:
+            return
+        use = ComponentUse(
+            stage_name=manager.state.stage_name or self.__class__.__name__,
+            component_name=(
+                "text_encoder"
+                if encoder_index == 0
+                else f"text_encoder_{encoder_index + 1}"
+            ),
+            access_kind=FORWARD_ACCESS,
+            preferred_ready_after_request=encoder_index == 0,
+        )
+        manager.before_use(use)
 
     def _forward_text_encoder(self, text_encoder, encoder_forward_kwargs):
         if not getattr(text_encoder, "uses_sglang_forward_context", True):
@@ -289,6 +308,7 @@ class TextEncodingStage(PipelineStage):
                 encoder_forward_kwargs["attention_mask"] = attention_mask
             if "use_cache" in inspect.signature(text_encoder.forward).parameters:
                 encoder_forward_kwargs["use_cache"] = False
+            self._manage_text_encoder_use(i)
             outputs: BaseEncoderOutput = self._forward_text_encoder(
                 text_encoder, encoder_forward_kwargs
             )
