@@ -13,6 +13,7 @@ import torch
 
 from sglang.multimodal_gen.configs.models.encoders import BaseEncoderOutput
 from sglang.multimodal_gen.runtime.distributed import get_local_torch_device
+from sglang.multimodal_gen.runtime.managers.component_manager import ComponentUse
 from sglang.multimodal_gen.runtime.managers.forward_context import set_forward_context
 from sglang.multimodal_gen.runtime.pipelines_core.schedule_batch import Req
 from sglang.multimodal_gen.runtime.pipelines_core.stages.base import PipelineStage
@@ -23,7 +24,6 @@ from sglang.multimodal_gen.runtime.pipelines_core.stages.validators import (
     VerificationResult,
 )
 from sglang.multimodal_gen.runtime.server_args import ServerArgs
-from sglang.multimodal_gen.runtime.managers.component_residency import ComponentUse
 from sglang.multimodal_gen.runtime.utils.logging_utils import init_logger
 
 logger = init_logger(__name__)
@@ -329,7 +329,9 @@ class TextEncodingStage(PipelineStage):
                 elif attention_mask is not None:
                     mask_to_store = attention_mask.to(device=target_device)
                 else:
-                    mask_to_store = torch.ones(input_ids.shape[:2], device=target_device)
+                    mask_to_store = torch.ones(
+                        input_ids.shape[:2], device=target_device
+                    )
                 attn_masks_list.append(mask_to_store)
 
         # Shape results according to return_type

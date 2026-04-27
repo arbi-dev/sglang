@@ -46,6 +46,7 @@ from sglang.multimodal_gen.runtime.models.dits.mova_video_dit import (
 # Create aliases for backward compatibility
 video_sinusoidal_embedding_1d = sinusoidal_embedding_1d
 audio_sinusoidal_embedding_1d = sinusoidal_embedding_1d
+from sglang.multimodal_gen.runtime.managers.component_manager import ComponentUse
 from sglang.multimodal_gen.runtime.pipelines_core.schedule_batch import OutputBatch, Req
 from sglang.multimodal_gen.runtime.pipelines_core.stages.base import (
     PipelineStage,
@@ -62,8 +63,6 @@ from sglang.multimodal_gen.runtime.pipelines_core.stages.validators import (
 )
 from sglang.multimodal_gen.runtime.platforms import current_platform
 from sglang.multimodal_gen.runtime.server_args import ServerArgs, get_global_server_args
-from sglang.multimodal_gen.runtime.managers.component_residency import ComponentUse
-from sglang.multimodal_gen.runtime.managers.layerwise_offload import OffloadableDiTMixin
 from sglang.multimodal_gen.runtime.utils.logging_utils import init_logger
 from sglang.multimodal_gen.runtime.utils.perf_logger import StageProfiler
 from sglang.multimodal_gen.runtime.utils.profiler import SGLDiffusionProfiler
@@ -159,7 +158,6 @@ class MOVADenoisingStage(PipelineStage):
         self._cache_dit_enabled = False
         self._cached_num_steps = None
         self._torch_compiled = False
-        self._active_video_dit_use: ComponentUse | None = None
 
     def component_uses(
         self, server_args: ServerArgs, stage_name: str | None = None
@@ -388,9 +386,11 @@ class MOVADenoisingStage(PipelineStage):
             self._manage_device_placement(current_model, model_to_offload, server_args)
         return current_model
 
-    def _manage_video_dit_use(self, current_model: nn.Module, default_name: str) -> bool:
+    def _manage_video_dit_use(
+        self, current_model: nn.Module, default_name: str
+    ) -> bool:
         manager = self._component_residency_manager
-        if manager is None or not manager.enabled:
+        if manager is None:
             return False
 
         component_name = manager.component_name_for_module(current_model, default_name)
@@ -401,16 +401,7 @@ class MOVADenoisingStage(PipelineStage):
             phase=component_name,
             preferred_after_request=component_name == "video_dit",
         )
-        if (
-            self._active_video_dit_use is not None
-            and self._active_video_dit_use.component_name != use.component_name
-        ):
-            manager.after_use(self._active_video_dit_use)
-            self._active_video_dit_use = None
-
-        if self._active_video_dit_use is None:
-            manager.before_use(use)
-            self._active_video_dit_use = use
+        manager.switch_use(use, group_key="video_dit_forward")
         return True
 
     def _ensure_shared_models_on_device(self, server_args: ServerArgs):
@@ -639,16 +630,8 @@ class MOVADenoisingStage(PipelineStage):
                     if not is_warmup and hasattr(self, "step_profile"):
                         self.step_profile()
 
-        if (
-            self._component_residency_manager is not None
-            and self._active_video_dit_use is not None
-        ):
-            self._component_residency_manager.after_use(self._active_video_dit_use)
-            self._active_video_dit_use = None
-        else:
-            for dit in filter(None, [self.video_dit, self.video_dit_2, self.audio_dit]):
-                if isinstance(dit, OffloadableDiTMixin):
-                    dit.prepare_for_next_req()
+        if self._component_residency_manager is not None:
+            self._component_residency_manager.finish_active_use("video_dit_forward")
 
         return batch
 

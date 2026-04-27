@@ -21,6 +21,10 @@ from sglang.multimodal_gen.runtime.disaggregation.roles import (
 from sglang.multimodal_gen.runtime.loader.component_loaders.component_loader import (
     PipelineComponentLoader,
 )
+from sglang.multimodal_gen.runtime.managers.component_manager import (
+    ComponentResidencyManager,
+    get_global_component_residency_manager,
+)
 from sglang.multimodal_gen.runtime.pipelines_core.executors.pipeline_executor import (
     PipelineExecutor,
 )
@@ -41,9 +45,6 @@ from sglang.multimodal_gen.runtime.server_args import ServerArgs
 from sglang.multimodal_gen.runtime.utils.hf_diffusers_utils import (
     maybe_download_model,
     verify_model_config_and_directory,
-)
-from sglang.multimodal_gen.runtime.managers.component_residency import (
-    PipelineResidencyManager,
 )
 from sglang.multimodal_gen.runtime.utils.logging_utils import init_logger
 
@@ -95,7 +96,7 @@ class ComposedPipelineBase(ABC):
         self._stages: list[PipelineStage] = []
         self._stage_name_mapping: dict[str, PipelineStage] = {}
         self.executor = executor or self.build_executor(server_args=server_args)
-        self.component_residency_manager: PipelineResidencyManager | None = None
+        self.component_residency_manager: ComponentResidencyManager | None = None
 
         if required_config_modules is not None:
             self._required_config_modules = required_config_modules
@@ -742,18 +743,9 @@ class ComposedPipelineBase(ABC):
                 main_process_only=True,
             )
 
-        if server_args.component_residency_manager == "disabled":
-            self.executor.component_residency_manager = None
-            for stage in self.stages:
-                stage.set_component_residency_manager(None)
-        else:
-            if self.component_residency_manager is None:
-                self.component_residency_manager = PipelineResidencyManager(
-                    self, server_args
-                )
-            self.component_residency_manager.refresh_pipeline(self)
-            self.executor.component_residency_manager = (
-                self.component_residency_manager
-            )
+        self.component_residency_manager = get_global_component_residency_manager(
+            self, server_args
+        )
+        self.executor.component_residency_manager = self.component_residency_manager
 
         return self.executor.execute_with_profiling(self.stages, batch, server_args)

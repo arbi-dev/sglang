@@ -195,7 +195,7 @@ class ServerArgs(DisaggArgsMixin):
     use_fsdp_inference: bool = False
     pin_cpu_memory: bool = True
     ltx2_two_stage_device_mode: str | None = None
-    component_residency_manager: str = "disabled"
+    component_residency_manager: str = "static"
     component_residency_dynamic_budget: bool = False
     component_residency_trace: bool = False
 
@@ -1008,10 +1008,10 @@ class ServerArgs(DisaggArgsMixin):
             choices=COMPONENT_RESIDENCY_MANAGER_MODES,
             default=ServerArgs.component_residency_manager,
             help=(
-                "Component residency scheduler mode. 'static' follows existing offload "
-                "flags and declared use-sites, 'dynamic' may keep additional components "
-                "resident when the dynamic budget gate allows it, and 'disabled' keeps "
-                "legacy stage-local behavior."
+                "Component residency scheduler mode. 'static' is the default path and "
+                "follows existing offload flags and declared use-sites, 'dynamic' may "
+                "keep additional components resident when the dynamic budget gate "
+                "allows it, and 'disabled' is an explicit legacy fallback."
             ),
         )
         parser.add_argument(

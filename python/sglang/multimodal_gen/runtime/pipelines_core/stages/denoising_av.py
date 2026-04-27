@@ -10,7 +10,6 @@ from sglang.multimodal_gen.runtime.pipelines_core.stages.ltx_2_denoising import 
     LTX2DenoisingStage,
 )
 from sglang.multimodal_gen.runtime.server_args import ServerArgs
-from sglang.multimodal_gen.runtime.managers.layerwise_offload import OffloadableDiTMixin
 from sglang.multimodal_gen.runtime.utils.logging_utils import init_logger
 
 logger = init_logger(__name__)
@@ -97,11 +96,8 @@ class LTX2AVDenoisingStage(LTX2DenoisingStage):
         if callable(release_phase_state):
             release_phase_state(current_phase)
 
-        if self._component_residency_manager is not None and self._active_dit_use:
-            self._component_residency_manager.after_use(self._active_dit_use)
-            self._active_dit_use = None
-        elif isinstance(self.transformer, OffloadableDiTMixin):
-            self.transformer.prepare_for_next_req()
+        if self._component_residency_manager is not None:
+            self._component_residency_manager.finish_active_use("dit_forward")
 
 
 class LTX2RefinementStage(LTX2AVDenoisingStage):

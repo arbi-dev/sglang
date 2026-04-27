@@ -1,12 +1,13 @@
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any, Sequence
 
 import torch.nn as nn
 
 from sglang.multimodal_gen.runtime.distributed import get_local_torch_device
+from sglang.multimodal_gen.runtime.managers.layerwise_offload import OffloadableDiTMixin
 from sglang.multimodal_gen.runtime.platforms import current_platform
 from sglang.multimodal_gen.runtime.server_args import ServerArgs
-from sglang.multimodal_gen.runtime.managers.layerwise_offload import OffloadableDiTMixin
 from sglang.multimodal_gen.runtime.utils.logging_utils import init_logger
 
 logger = init_logger(__name__)
@@ -14,10 +15,12 @@ logger = init_logger(__name__)
 
 @dataclass(slots=True)
 class ComponentUse:
-    """Describes a usage of an component by a stage, including some key details"""
+    """Describes an active usage of an component by a stage, including some key details"""
+
     stage_name: str
     component_name: str
     access_kind: str = "forward"
+    # used only for dual-dit scenario, e.g. stage1 and stage2
     phase: str | None = None
     preferred_after_request: bool = False
     allow_prefetch: bool = True
@@ -26,8 +29,9 @@ class ComponentUse:
 @dataclass(slots=True)
 class ResidencyState:
     """
-        Describe necessary runtime info for PipelineResidencyManager to take action
+    Describe necessary runtime info for ComponentResidencyManager to take action
     """
+
     stages: Sequence[Any] = ()
     stage_index: int = -1
     stage_name: str | None = None
@@ -41,14 +45,15 @@ class ResidencyState:
 
 
 class ComponentResidencyStrategy:
-    """Baseclass for describing how a component should be treated (regarding the state of where its weights locates)
+    """Baseclass for describing how a component should be treated (regarding where its weights locates)
 
-        e.g., a LayerwiseOffloadStrategy would override:
-            enter: prefetch some layers before DiT is used, and
-            exits: release GPU weight snapshot after DiT is used
-        to achieve desired behavior
+    e.g., a LayerwiseOffloadStrategy would override:
+        enter: to prefetch some layers before DiT is used, and
+        exits: to release GPU weight snapshot after DiT is used
+    to achieve desired behavior
 
     """
+
     name = "resident"
 
     def prepare_for_use(
@@ -57,7 +62,7 @@ class ComponentResidencyStrategy:
         use: ComponentUse,
         state: ResidencyState,
     ) -> None:
-        """hook called """
+        """hook called"""
         self.enter(module)
 
     def wait_for_use(
@@ -109,6 +114,7 @@ class StageManagedStrategy(ComponentResidencyStrategy):
 
 class VanillaD2HStrategy(ComponentResidencyStrategy):
     """A strategy that performs native torch D2H and H2D"""
+
     name = "vanilla"
 
     def enter(self, module: nn.Module) -> None:
@@ -125,6 +131,7 @@ class VanillaD2HStrategy(ComponentResidencyStrategy):
 
 class LayerwiseOffloadStrategy(ComponentResidencyStrategy):
     """A wrapper around LayerwiseOffloadManager to fit in a ComponentResidencyStrategy"""
+
     name = "layerwise"
 
     def enter(self, module: nn.Module) -> None:
@@ -247,68 +254,8 @@ def build_component_residency_strategy(
     return ResidentStrategy()
 
 
-@dataclass(slots=True)
-class SequentialComponent:
-    phase: str
-    name: str
-    module: nn.Module
-    strategy: ComponentResidencyStrategy
-
-
-class SequentialComponentGroup:
-    """Lifecycle helper for mutually exclusive components used in phase order.
-
-    e.g. the high-noise DiT and low-noise DiT in Wan2.2 forms a SequentialComponentGroup natually
-    """
-
-    def __init__(self, components: list[SequentialComponent]) -> None:
-        self._components_by_phase = {
-            component.phase: component for component in components
-        }
-        self._phase_order = tuple(component.phase for component in components)
-        self.active_phase: str | None = None
-
-    def switch_phase(self, phase: str) -> None:
-        if phase == self.active_phase:
-            return
-        if self.active_phase is not None:
-            self.exit_phase(self.active_phase, next_phase=phase)
-        self.enter_phase(phase)
-
-    def enter_phase(self, phase: str) -> None:
-        component = self._components_by_phase[phase]
-        component.strategy.enter(component.module)
-        self.active_phase = phase
-
-    def exit_phase(self, phase: str, next_phase: str | None = None) -> None:
-        component = self._components_by_phase[phase]
-        next_component = (
-            self._components_by_phase[next_phase] if next_phase is not None else None
-        )
-        component.strategy.exit(
-            component.module,
-            next_module=next_component.module if next_component is not None else None,
-        )
-        if self.active_phase == phase:
-            self.active_phase = None
-
-    def finish_request(self, preferred_phase: str | None = None) -> None:
-        for phase in self._phase_order:
-            component = self._components_by_phase[phase]
-            use = ComponentUse(stage_name="", component_name=component.name, phase=phase)
-            state = ResidencyState()
-            component.strategy.finish_request(
-                component.module,
-                use,
-                state,
-                preferred=phase == preferred_phase,
-            )
-
-        self.active_phase = preferred_phase
-
-
-class PipelineResidencyManager:
-    """Executor-owned component lifecycle coordinator.
+class ComponentResidencyManager:
+    """Executor-owned component lifecycle coordinator. Provide hooks for a PipelineExecutor
 
     Hooks are called around executor progress:
         before reqeust: request start initializes state,
@@ -322,6 +269,7 @@ class PipelineResidencyManager:
          stage exit releases completed
     uses and may prefetch the next stage, explicit use hooks wrap intra-stage
     sequential components, and request finish restores the preferred residency state.
+    The manager instance is global and rebound to the active pipeline before request execution.
     """
 
     def __init__(self, pipeline: Any, server_args: ServerArgs) -> None:
@@ -334,7 +282,7 @@ class PipelineResidencyManager:
         )
         self._stage_names_by_id: dict[int, str] = {}
         self._stage_uses_by_index: list[tuple[ComponentUse, ...]] = []
-        self._strategy_cache: dict[str, ComponentResidencyStrategy] = {}
+        self._active_uses_by_group: dict[str, ComponentUse] = {}
         self._uses_seen: dict[str, ComponentUse] = {}
 
     @property
@@ -342,11 +290,20 @@ class PipelineResidencyManager:
         return self.server_args.component_residency_manager != "disabled"
 
     def refresh_pipeline(self, pipeline: Any) -> None:
+        if pipeline is not self.pipeline:
+            self.strategy_for.cache_clear()
+            self._active_uses_by_group.clear()
+            self._uses_seen.clear()
         self.pipeline = pipeline
         self._stage_names_by_id = {
             id(stage): name
             for name, stage in getattr(pipeline, "_stage_name_mapping", {}).items()
         }
+
+    def refresh_server_args(self, server_args: ServerArgs) -> None:
+        if server_args is not self.server_args:
+            self.strategy_for.cache_clear()
+        self.server_args = server_args
 
     def begin_request(
         self,
@@ -355,9 +312,7 @@ class PipelineResidencyManager:
         server_args: ServerArgs,
     ) -> None:
         """A hook called before processing an actual request"""
-        if not self.enabled:
-            return
-        self.server_args = server_args
+        self.refresh_server_args(server_args)
         self.state = ResidencyState(
             stages=stages,
             batch_is_warmup=bool(getattr(batch, "is_warmup", False)),
@@ -365,11 +320,15 @@ class PipelineResidencyManager:
             dynamic_budget=server_args.component_residency_dynamic_budget,
             trace_enabled=server_args.component_residency_trace,
         )
-        self._stage_uses_by_index = [
-            tuple(stage.component_uses(server_args, self.stage_name(stage)))
-            for stage in stages
-        ]
+        self._active_uses_by_group.clear()
         self._uses_seen.clear()
+        if self.enabled:
+            self._stage_uses_by_index = [
+                tuple(stage.component_uses(server_args, self.stage_name(stage)))
+                for stage in stages
+            ]
+        else:
+            self._stage_uses_by_index = []
         self._trace("request_start", detail=f"stages={len(stages)}")
 
     def before_stage(
@@ -403,14 +362,33 @@ class PipelineResidencyManager:
 
     def before_use(self, use: ComponentUse) -> None:
         """component use-site starts"""
-        self._prepare_use(use, required=True)
+        self._prepare_use(use, required=True, force=False)
 
     def prefetch_use(self, use: ComponentUse) -> None:
         """prepare for next stage by prefetching"""
-        self._prepare_use(use, required=False)
+        self._prepare_use(use, required=False, force=False)
 
-    def _prepare_use(self, use: ComponentUse, *, required: bool) -> None:
-        if not self.enabled:
+    def switch_use(self, use: ComponentUse, group_key: str | None = None) -> None:
+        """Switch an explicit intra-stage sequential use-site to a new component."""
+        key = group_key or use.access_kind or use.component_name
+        active_use = self._active_uses_by_group.get(key)
+        if active_use is not None and self._same_use(active_use, use):
+            return
+        if active_use is not None:
+            self._finish_use(active_use, force=True, keep_on_warmup=False)
+        self._prepare_use(use, required=True, force=True)
+        self._active_uses_by_group[key] = use
+
+    def finish_active_use(self, group_key: str) -> None:
+        """Finish the current explicit intra-stage use-site for a group."""
+        active_use = self._active_uses_by_group.pop(group_key, None)
+        if active_use is not None:
+            self._finish_use(active_use, force=True, keep_on_warmup=False)
+
+    def _prepare_use(
+        self, use: ComponentUse, *, required: bool, force: bool
+    ) -> None:
+        if not self.enabled and not force:
             return
         if not required and not use.allow_prefetch:
             return
@@ -433,13 +411,21 @@ class PipelineResidencyManager:
             strategy.wait_for_use(module, use, self.state)
 
     def after_use(self, use: ComponentUse) -> None:
-        if not self.enabled:
+        self._finish_use(use, force=False, keep_on_warmup=True)
+
+    def _finish_use(
+        self, use: ComponentUse, *, force: bool, keep_on_warmup: bool
+    ) -> None:
+        if not self.enabled and not force:
             return
         module = self.get_module(use.component_name)
         if module is None:
             self._trace("skip_missing", use)
             return
-        if self.state.batch_is_warmup or self._should_keep_after_use(use):
+        should_keep = (
+            keep_on_warmup and self.state.batch_is_warmup
+        ) or self._should_keep_after_use(use)
+        if should_keep:
             self._trace(
                 "keep",
                 use,
@@ -452,23 +438,23 @@ class PipelineResidencyManager:
         strategy.finish_use(module, use, self.state)
 
     def finish_request(self) -> None:
-        if not self.enabled:
+        if (
+            not self.enabled
+            and not self._uses_seen
+            and not self._active_uses_by_group
+        ):
             return
-        preferred_use = self._preferred_request_end_use()
+        for group_key in tuple(self._active_uses_by_group):
+            self.finish_active_use(group_key)
+        preferred_uses = self._preferred_request_end_uses()
         for component_name, use in list(self._uses_seen.items()):
             module = self.get_module(component_name)
             if module is None:
                 continue
-            preferred = (
-                preferred_use is not None
-                and preferred_use.component_name == component_name
-            )
-            if (
-                not preferred
-                and (
-                    self._should_keep_single_dit(component_name)
-                    or self._should_keep_for_dynamic_budget(component_name)
-                )
+            preferred = component_name in preferred_uses
+            if not preferred and (
+                self._should_keep_single_dit(component_name)
+                or self._should_keep_for_dynamic_budget(component_name)
             ):
                 self._trace(
                     "keep",
@@ -498,9 +484,7 @@ class PipelineResidencyManager:
     def stage_name(self, stage: Any) -> str:
         return self._stage_names_by_id.get(id(stage), stage.__class__.__name__)
 
-    def component_name_for_module(
-        self, module: nn.Module | None, default: str
-    ) -> str:
+    def component_name_for_module(self, module: nn.Module | None, default: str) -> str:
         if module is None:
             return default
         for name, candidate in getattr(self.pipeline, "modules", {}).items():
@@ -512,12 +496,10 @@ class PipelineResidencyManager:
         module = getattr(self.pipeline, "modules", {}).get(component_name)
         return module if isinstance(module, nn.Module) else None
 
+    @lru_cache(maxsize=None)
     def strategy_for(
         self, component_name: str, module: nn.Module
     ) -> ComponentResidencyStrategy:
-        strategy = self._strategy_cache.get(component_name)
-        if strategy is not None:
-            return strategy
         device_manager = getattr(self.pipeline, "_device_manager", None)
         if (
             callable(getattr(device_manager, "enter_phase", None))
@@ -529,7 +511,6 @@ class PipelineResidencyManager:
             strategy = build_component_residency_strategy(
                 component_name, module, self.server_args
             )
-        self._strategy_cache[component_name] = strategy
         return strategy
 
     def _stage_uses(self, stage_index: int) -> tuple[ComponentUse, ...]:
@@ -590,6 +571,30 @@ class PipelineResidencyManager:
                 return uses[0]
         return None
 
+    def _preferred_request_end_uses(self) -> dict[str, ComponentUse]:
+        preferred_uses: dict[str, ComponentUse] = {}
+        for uses in self._stage_uses_by_index:
+            for use in uses:
+                if use.preferred_after_request:
+                    preferred_uses[use.component_name] = use
+        for use in self._uses_seen.values():
+            if use.preferred_after_request:
+                preferred_uses[use.component_name] = use
+        if preferred_uses:
+            return preferred_uses
+        preferred_use = self._preferred_request_end_use()
+        if preferred_use is None:
+            return {}
+        return {preferred_use.component_name: preferred_use}
+
+    @staticmethod
+    def _same_use(lhs: ComponentUse, rhs: ComponentUse) -> bool:
+        return (
+            lhs.component_name == rhs.component_name
+            and lhs.access_kind == rhs.access_kind
+            and lhs.phase == rhs.phase
+        )
+
     def _trace(
         self,
         action: str,
@@ -629,3 +634,23 @@ class PipelineResidencyManager:
             return param.device.type
         buffer = next(module.buffers(), None)
         return buffer.device.type if buffer is not None else None
+
+
+_GLOBAL_COMPONENT_RESIDENCY_MANAGER: ComponentResidencyManager | None = None
+
+
+def get_global_component_residency_manager(
+    pipeline: Any,
+    server_args: ServerArgs,
+) -> ComponentResidencyManager:
+    global _GLOBAL_COMPONENT_RESIDENCY_MANAGER
+
+    if _GLOBAL_COMPONENT_RESIDENCY_MANAGER is None:
+        _GLOBAL_COMPONENT_RESIDENCY_MANAGER = ComponentResidencyManager(
+            pipeline, server_args
+        )
+    else:
+        _GLOBAL_COMPONENT_RESIDENCY_MANAGER.refresh_server_args(server_args)
+    _GLOBAL_COMPONENT_RESIDENCY_MANAGER.refresh_pipeline(pipeline)
+
+    return _GLOBAL_COMPONENT_RESIDENCY_MANAGER
