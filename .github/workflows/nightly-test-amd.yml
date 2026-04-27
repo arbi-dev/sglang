@@ -41,6 +41,7 @@ on:
           - nightly-8-gpu-deepseek-v32-mtp
           - nightly-8-gpu-deepseek-v3-kv-fp8
           - nightly-8-gpu-kimi-k25
+          - nightly-8-gpu-kimi-k26
           - nightly-8-gpu-qwen3-235b
           - nightly-8-gpu-qwen35
           - nightly-8-gpu-glm51
@@ -58,6 +59,7 @@ on:
           - nightly-perf-8-gpu-mi35x-deepseek-v32-basic
           - nightly-perf-8-gpu-mi35x-deepseek-v32-mtp
           - nightly-8-gpu-mi35x-kimi-k25
+          - nightly-8-gpu-mi35x-kimi-k26
           - nightly-8-gpu-mi35x-qwen3-235b-mxfp4
           - nightly-8-gpu-mi35x-qwen35
           - nightly-8-gpu-mi35x-glm51
@@ -594,6 +596,36 @@ jobs:
           bash scripts/ci/amd/amd_ci_exec.sh -w /sglang-checkout/test \
             -e GITHUB_STEP_SUMMARY="/sglang-checkout/github_summary.md" \
             python3 run_suite.py --hw amd --suite nightly-amd-accuracy-8-gpu-kimi-k25 --nightly --timeout-per-file 3600 ${{ inputs.continue_on_error && '--continue-on-error' || '' }} || TEST_EXIT_CODE=$?
+          echo "$(<github_summary.md )" >> $GITHUB_STEP_SUMMARY || true
+          exit ${TEST_EXIT_CODE:-0}
+
+  # 8-GPU Kimi-K2.6 (Accuracy)
+  nightly-8-gpu-kimi-k26:
+    if: (github.repository == 'sgl-project/sglang' || github.event_name == 'pull_request') && (!(inputs.job_filter || inputs.job_select) || (inputs.job_filter || inputs.job_select) == 'all' || contains(format(',{0},', inputs.job_filter || inputs.job_select), ',nightly-8-gpu-kimi-k26,'))
+    runs-on: linux-mi325-8gpu-sglang
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Setup docker
+        run: |
+          touch github_summary.md
+          bash scripts/ci/amd/amd_ci_start_container.sh
+        env:
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+
+      - name: Install dependencies
+        run: bash scripts/ci/amd/amd_ci_install_dependency.sh
+
+      - name: Accuracy Test (8-GPU Kimi-K2.6)
+        timeout-minutes: 120
+        run: |
+          > github_summary.md  # Clear summary file
+          bash scripts/ci/amd/amd_ci_exec.sh -w /sglang-checkout/test \
+            -e GITHUB_STEP_SUMMARY="/sglang-checkout/github_summary.md" \
+            python3 run_suite.py --hw amd --suite nightly-amd-accuracy-8-gpu-kimi-k26 --nightly --timeout-per-file 3600 ${{ inputs.continue_on_error && '--continue-on-error' || '' }} || TEST_EXIT_CODE=$?
           echo "$(<github_summary.md )" >> $GITHUB_STEP_SUMMARY || true
           exit ${TEST_EXIT_CODE:-0}
 
@@ -1218,6 +1250,39 @@ jobs:
           echo "$(<github_summary.md )" >> $GITHUB_STEP_SUMMARY || true
           exit ${TEST_EXIT_CODE:-0}
 
+  # MI35x 8-GPU Kimi-K2.6 (Accuracy)
+  nightly-8-gpu-mi35x-kimi-k26:
+    if: (github.repository == 'sgl-project/sglang' || github.event_name == 'pull_request') && (!(inputs.job_filter || inputs.job_select) || (inputs.job_filter || inputs.job_select) == 'all' || contains(format(',{0},', inputs.job_filter || inputs.job_select), ',nightly-8-gpu-mi35x-kimi-k26,'))
+    runs-on: linux-mi35x-gpu-8
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Setup docker
+        run: |
+          touch github_summary.md
+          bash scripts/ci/amd/amd_ci_start_container.sh
+        env:
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+
+      - name: Install dependencies
+        run: |
+          bash scripts/ci/amd/amd_ci_install_dependency.sh
+          # Install tabulate for run_suite.py (missing in MI35x container)
+          bash scripts/ci/amd/amd_ci_exec.sh pip install tabulate
+
+      - name: Accuracy Test MI35x (8-GPU Kimi-K2.6)
+        timeout-minutes: 180
+        run: |
+          > github_summary.md  # Clear summary file
+          bash scripts/ci/amd/amd_ci_exec.sh -w /sglang-checkout/test \
+            -e GITHUB_STEP_SUMMARY="/sglang-checkout/github_summary.md" \
+            python3 run_suite.py --hw amd --suite nightly-amd-accuracy-8-gpu-mi35x-kimi-k26 --nightly --timeout-per-file 7200 ${{ inputs.continue_on_error && '--continue-on-error' || '' }} || TEST_EXIT_CODE=$?
+          echo "$(<github_summary.md )" >> $GITHUB_STEP_SUMMARY || true
+          exit ${TEST_EXIT_CODE:-0}
+
   # MI35x 8-GPU Qwen3-235B-MXFP4 (Accuracy + Performance)
   nightly-8-gpu-mi35x-qwen3-235b-mxfp4:
     if: (github.repository == 'sgl-project/sglang' || github.event_name == 'pull_request') && (!(inputs.job_filter || inputs.job_select) || (inputs.job_filter || inputs.job_select) == 'all' || contains(format(',{0},', inputs.job_filter || inputs.job_select), ',nightly-8-gpu-mi35x-qwen3-235b-mxfp4,'))
@@ -1441,6 +1506,7 @@ jobs:
       - nightly-8-gpu-deepseek-v32-mtp
       - nightly-8-gpu-deepseek-v3-kv-fp8
       - nightly-8-gpu-kimi-k25
+      - nightly-8-gpu-kimi-k26
       - nightly-8-gpu-qwen3-235b
       - nightly-8-gpu-qwen35
       - nightly-8-gpu-glm51
@@ -1458,6 +1524,7 @@ jobs:
       - nightly-accuracy-8-gpu-mi35x-deepseek-v32
       - nightly-accuracy-8-gpu-mi35x-deepseek-v32-mtp
       - nightly-8-gpu-mi35x-kimi-k25
+      - nightly-8-gpu-mi35x-kimi-k26
       - nightly-8-gpu-mi35x-qwen3-235b-mxfp4
       - nightly-8-gpu-mi35x-qwen35
       - nightly-8-gpu-mi35x-glm51
