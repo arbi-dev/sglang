@@ -167,44 +167,26 @@ def _preflight_check_workspace_memory(
     """Collectively decide whether to enter create_allreduce_fusion_workspace.
 
     If one rank OOMs in flashinfer's per-rank cuMemCreate and escapes via
-    the caller's try/except while another rank enters the internal
-    cross-rank handle exchange, the surviving rank blocks until the NCCL
-    watchdog aborts the process ~10 minutes later. This preflight has
-    every rank probe a matching cuMemCreate locally and vote on a CPU
-    group so all ranks either proceed or skip atomically.
+    the caller's try/except while peers are blocked in the cross-rank
+    handle exchange, the surviving rank stalls until the NCCL watchdog
+    aborts ~10 minutes later. Every rank probes a matching cuMemCreate
+    and votes on a CPU group so all ranks proceed or skip atomically.
 
-    torch.cuda.mem_get_info() is not a reliable signal on FABRIC-handle
-    systems (the fabric pool can be smaller than the driver's generic
-    free counter), so we probe with the same handle type flashinfer
-    will use -- FABRIC on devices where is_mnnvl_fabric_supported is
-    True (typically GB200), POSIX_FILE_DESCRIPTOR otherwise (H200/B200).
-
-    Lifecycle note: the probe momentarily allocates a buffer the size of
-    flashinfer's largest single allocation (the lamport buffer, capped at
-    3 * MAX_COMM_SIZE ~= 6 GiB) and releases it immediately. Intended to
-    run once at startup before the model occupies device memory.
-
-    Caveat: on POSIX_FD systems the probe doesn't model FD-table
-    exhaustion, which is a separate failure mode flashinfer can hit
-    across its three handle allocations.
+    Probes with the handle type flashinfer will use (FABRIC where
+    is_mnnvl_fabric_supported, POSIX_FD otherwise) since
+    torch.cuda.mem_get_info() doesn't reflect the fabric pool.
+    The probe transiently allocates the lamport buffer
+    (<= 3 * MAX_COMM_SIZE ~= 6 GiB) and releases it; runs once at
+    startup before the model occupies device memory. POSIX_FD FD-table
+    exhaustion is not modeled.
     """
-    # Setup: import + prop construction + granularity query. Any failure
-    # here means the preflight can't run on this platform; fall through to
-    # the existing try/except around create_allreduce_fusion_workspace,
-    # which still handles OOM at a per-rank granularity (the same behavior
-    # we had before this preflight existed).
     try:
         import torch.distributed as dist
         from cuda import cuda as _cu
         from flashinfer.comm.mnnvl import is_mnnvl_fabric_supported
 
-        # Match flashinfer's SymmDeviceMemory exchanger selection
-        # (mnnvl.py:949-957): FABRIC on systems with multi-node NVLink
-        # fabric initialized (e.g. GB200), POSIX_FD elsewhere (H200/B200).
-        # The hang surface is identical -- any per-rank cuMemCreate OOM
-        # that escapes via the caller's try/except while peers are blocked
-        # in the cross-rank handle exchange triggers the NCCL watchdog --
-        # so we must probe with whichever handle flashinfer will use.
+        # Match flashinfer SymmDeviceMemory's exchanger selection
+        # (mnnvl.py:949-957) so the probe sees the same allocator.
         if is_mnnvl_fabric_supported(torch.cuda.current_device()):
             handle_type = _cu.CUmemAllocationHandleType.CU_MEM_HANDLE_TYPE_FABRIC
         else:
@@ -213,9 +195,8 @@ def _preflight_check_workspace_memory(
             )
 
         dtype_bytes = torch.empty((), dtype=dtype).element_size()
-        # Mirror flashinfer's lamport sizing in trtllm_ar.py: cap the
-        # per-comm size at MAX_COMM_SIZE (INT32_MAX rounded down to 2 MiB)
-        # then triple it for the lamport buffer.
+        # Mirror flashinfer's lamport sizing (trtllm_ar.py): per-comm size
+        # capped at MAX_COMM_SIZE, then x3 for the lamport buffer.
         _MAX_COMM_SIZE = 2147483647 & ~((1 << 21) - 1)
         lamport_comm_size = min(
             world_size * max_token_num * hidden_dim * dtype_bytes,
@@ -236,9 +217,8 @@ def _preflight_check_workspace_memory(
             _cu.CUmemAllocationGranularity_flags.CU_MEM_ALLOC_GRANULARITY_RECOMMENDED,
         )
         if err != _cu.CUresult.CUDA_SUCCESS:
-            # Fail closed: if the driver can't even tell us the granularity
-            # for the chosen handle type, flashinfer's real allocation won't
-            # work either -- skip fusion rather than risk the 10-minute hang.
+            # Fail closed: granularity failure implies the real allocation
+            # would fail too.
             logger.warning(
                 "FlashInfer workspace preflight: cuMemGetAllocationGranularity "
                 "failed (%s). Skipping allreduce fusion.",
@@ -247,6 +227,8 @@ def _preflight_check_workspace_memory(
             return False
         aligned_probe = ((probe_size + gran - 1) // gran) * gran
     except Exception as e:
+        # Setup couldn't run on this platform; fall through to the legacy
+        # per-rank try/except around create_allreduce_fusion_workspace.
         logger.warning(
             "FlashInfer workspace preflight bypassed (setup error: %s); "
             "proceeding without the collective guard.",
@@ -254,7 +236,6 @@ def _preflight_check_workspace_memory(
         )
         return True
 
-    # Probe: the cuMemRelease must run regardless of what happens next.
     local_ok = 0
     handle = None
     try:
@@ -264,9 +245,8 @@ def _preflight_check_workspace_memory(
         if local_ok:
             _cu.cuMemRelease(handle)
 
-    # Vote: failures here (e.g. gloo transport error) cannot fall through
-    # to True -- if some ranks enter the flashinfer call and others don't,
-    # we reintroduce the original hang. Skip fusion on any vote failure.
+    # Vote: any failure here must fail closed -- falling through to True
+    # would let some ranks enter flashinfer while others skip and hang.
     try:
         group = cpu_group
         if group is None:
