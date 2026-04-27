@@ -44,7 +44,7 @@ class ImageGenerationsRequest(BaseModel):
     true_cfg_scale: Optional[float] = (
         None  # for CFG vs guidance distillation (e.g., QwenImage)
     )
-    seed: Optional[Union[int, List[int]]] = 42
+    seed: Optional[Union[int, List[int]]] = None
     generator_device: Optional[str] = "cuda"
     negative_prompt: Optional[str] = None
     output_quality: Optional[str] = "default"
