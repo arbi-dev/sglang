@@ -282,6 +282,7 @@ class ComponentResidencyManager:
         )
         self._stage_names_by_id: dict[int, str] = {}
         self._stage_uses_by_index: list[tuple[ComponentUse, ...]] = []
+        # marks the active use of a group key
         self._active_uses_by_group: dict[str, ComponentUse] = {}
         self._uses_seen: dict[str, ComponentUse] = {}
 
@@ -362,35 +363,56 @@ class ComponentResidencyManager:
 
     def before_use(self, use: ComponentUse) -> None:
         """component use-site starts"""
-        self._prepare_use(use, required=True, force=False)
+        if not self.enabled:
+            return
+        self._prepare_forward_use(use)
 
     def prefetch_use(self, use: ComponentUse) -> None:
         """prepare for next stage by prefetching"""
-        self._prepare_use(use, required=False, force=False)
+        if not self.enabled:
+            return
+        self._prefetch_use(use)
 
     def switch_use(self, use: ComponentUse, group_key: str | None = None) -> None:
-        """Switch an explicit intra-stage sequential use-site to a new component."""
+        """Switch an explicit intra-stage use-site.
+
+        This path always enforces readiness; disabled mode only disables
+        cross-stage scheduling, not required intra-stage component switching.
+        """
         key = group_key or use.access_kind or use.component_name
-        active_use = self._active_uses_by_group.get(key)
-        if active_use is not None and self._same_use(active_use, use):
+        prev_active_use = self._active_uses_by_group.get(key)
+        if prev_active_use is not None and self._same_use(prev_active_use, use):
             return
-        if active_use is not None:
-            self._finish_use(active_use, force=True, keep_on_warmup=False)
-        self._prepare_use(use, required=True, force=True)
+        if prev_active_use is not None:
+            # finish the previously active use
+            self._finish_use(prev_active_use, keep_on_warmup=False)
+        # prepare for the upcoming use
+        self._prepare_forward_use(use)
         self._active_uses_by_group[key] = use
 
     def finish_active_use(self, group_key: str) -> None:
         """Finish the current explicit intra-stage use-site for a group."""
         active_use = self._active_uses_by_group.pop(group_key, None)
         if active_use is not None:
-            self._finish_use(active_use, force=True, keep_on_warmup=False)
+            self._finish_use(active_use, keep_on_warmup=False)
 
-    def _prepare_use(
-        self, use: ComponentUse, *, required: bool, force: bool
-    ) -> None:
-        if not self.enabled and not force:
+    def _prepare_forward_use(self, use: ComponentUse) -> None:
+        """Prepare a component that is about to run and wait until it is ready."""
+        module = self.get_module(use.component_name)
+        if module is None:
+            self._trace("skip_missing", use)
             return
-        if not required and not use.allow_prefetch:
+        strategy = self.strategy_for(use.component_name, module)
+        self._uses_seen[use.component_name] = use
+        self.state.current_use = use
+        self._trace("prepare", use, strategy, module)
+        strategy.prepare_for_use(module, use, self.state)
+        self._trace("wait", use, strategy, module)
+        strategy.wait_for_use(module, use, self.state)
+
+    def _prefetch_use(self, use: ComponentUse) -> None:
+        """Prepare a future component opportunistically without waiting."""
+        if not use.allow_prefetch:
             return
         module = self.get_module(use.component_name)
         if module is None:
@@ -398,26 +420,20 @@ class ComponentResidencyManager:
             return
         strategy = self.strategy_for(use.component_name, module)
         self._uses_seen[use.component_name] = use
-        if not required and isinstance(strategy, VanillaD2HStrategy):
+        if isinstance(strategy, VanillaD2HStrategy):
             self._trace("prefetch_skip", use, strategy, module)
             return
 
-        if required:
-            self.state.current_use = use
-        self._trace("prepare" if required else "prefetch", use, strategy, module)
+        self._trace("prefetch", use, strategy, module)
         strategy.prepare_for_use(module, use, self.state)
-        if required:
-            self._trace("wait", use, strategy, module)
-            strategy.wait_for_use(module, use, self.state)
 
     def after_use(self, use: ComponentUse) -> None:
-        self._finish_use(use, force=False, keep_on_warmup=True)
-
-    def _finish_use(
-        self, use: ComponentUse, *, force: bool, keep_on_warmup: bool
-    ) -> None:
-        if not self.enabled and not force:
+        if not self.enabled:
             return
+        self._finish_use(use, keep_on_warmup=True)
+
+    def _finish_use(self, use: ComponentUse, *, keep_on_warmup: bool) -> None:
+        """finish a specific use by keeping them resident or call finish_use hook"""
         module = self.get_module(use.component_name)
         if module is None:
             self._trace("skip_missing", use)
@@ -438,11 +454,7 @@ class ComponentResidencyManager:
         strategy.finish_use(module, use, self.state)
 
     def finish_request(self) -> None:
-        if (
-            not self.enabled
-            and not self._uses_seen
-            and not self._active_uses_by_group
-        ):
+        if not self.enabled and not self._uses_seen and not self._active_uses_by_group:
             return
         for group_key in tuple(self._active_uses_by_group):
             self.finish_active_use(group_key)

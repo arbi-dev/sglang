@@ -121,9 +121,7 @@ class DmdDenoisingStage(DenoisingStage):
                         )
                     else:
                         current_model = self.transformer
-                        self._manage_dit_use_site(
-                            current_model, "transformer", batch
-                        )
+                        self._manage_dit_use_site(current_model, "transformer", batch)
                     # Expand latents for I2V
                     noise_latents = latents.clone()
                     latent_model_input = latents.to(target_dtype)

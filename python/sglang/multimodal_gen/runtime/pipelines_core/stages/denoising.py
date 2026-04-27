@@ -1027,6 +1027,9 @@ class DenoisingStage(PipelineStage, RolloutDenoisingMixin):
         current_phase: str,
         batch: Req,
     ) -> None:
+        """
+            manage dit's residency by switching the use
+        """
         manager = self._component_residency_manager
         if manager is None:
             return
