@@ -18,10 +18,11 @@ from pathlib import Path
 
 from sglang.multimodal_gen.runtime.utils.logging_utils import init_logger
 from sglang.multimodal_gen.test.run_suite import (
-    PARAMETRIZED_CASE_GROUPS,
     SUITES,
     _maybe_pin_update_weights_model_pair,
     collect_test_items,
+    get_suite_files_rel,
+    partition_items_by_index,
     run_pytest,
 )
 
@@ -101,12 +102,7 @@ def main():
 
     # GT generation only runs DiffusionTestCase parametrized cases. Standalone
     # server tests such as disagg validate behavior but do not produce GT images.
-    if args.suite in PARAMETRIZED_CASE_GROUPS:
-        suite_files_rel = [
-            filename for filename, _ in PARAMETRIZED_CASE_GROUPS[args.suite]
-        ]
-    else:
-        suite_files_rel = SUITES[args.suite]
+    suite_files_rel = get_suite_files_rel(args.suite, parametrized_only=True)
 
     _maybe_pin_update_weights_model_pair(suite_files_rel)
     suite_files_abs = []
@@ -143,11 +139,7 @@ def main():
     partition_id = args.partition_id if args.partition_id is not None else 0
     total_partitions = args.total_partitions if args.total_partitions is not None else 1
 
-    my_items = [
-        item
-        for i, item in enumerate(all_test_items)
-        if i % total_partitions == partition_id
-    ]
+    my_items = partition_items_by_index(all_test_items, partition_id, total_partitions)
 
     logger.info(
         f"Partition {partition_id}/{total_partitions}: "

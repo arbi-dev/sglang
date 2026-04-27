@@ -189,6 +189,12 @@ def auto_partition(
     return partitions[rank] if rank < size else []
 
 
+def get_suite_files_rel(suite: str, parametrized_only: bool = False) -> list[str]:
+    if parametrized_only and suite in PARAMETRIZED_CASE_GROUPS:
+        return [filename for filename, _ in PARAMETRIZED_CASE_GROUPS[suite]]
+    return SUITES[suite]
+
+
 def _normalize_standalone_key(standalone_file: str) -> str:
     return f"standalone:{standalone_file}"
 
@@ -746,12 +752,16 @@ def run_pytest(
     )
 
 
-def partition_test_files(files, partition_id, total_partitions):
+def partition_items_by_index(
+    items: list[str], partition_id: int, total_partitions: int
+) -> list[str]:
     return [
-        file_path
-        for i, file_path in enumerate(files)
-        if i % total_partitions == partition_id
+        item for i, item in enumerate(items) if i % total_partitions == partition_id
     ]
+
+
+def partition_test_files(files, partition_id, total_partitions):
+    return partition_items_by_index(files, partition_id, total_partitions)
 
 
 def run_component_accuracy_files(files, filter_expr=None, continue_on_error=False):
