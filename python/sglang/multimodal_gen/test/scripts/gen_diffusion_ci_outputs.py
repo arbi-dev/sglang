@@ -18,6 +18,7 @@ from pathlib import Path
 
 from sglang.multimodal_gen.runtime.utils.logging_utils import init_logger
 from sglang.multimodal_gen.test.run_suite import (
+    PARAMETRIZED_CASE_GROUPS,
     SUITES,
     _maybe_pin_update_weights_model_pair,
     collect_test_items,
@@ -98,8 +99,15 @@ def main():
     test_root_dir = current_file_path.parent.parent  # scripts -> test
     target_dir = test_root_dir / "server"
 
-    # Get files from suite (same as run_suite.py)
-    suite_files_rel = SUITES[args.suite]
+    # GT generation only runs DiffusionTestCase parametrized cases. Standalone
+    # server tests such as disagg validate behavior but do not produce GT images.
+    if args.suite in PARAMETRIZED_CASE_GROUPS:
+        suite_files_rel = [
+            filename for filename, _ in PARAMETRIZED_CASE_GROUPS[args.suite]
+        ]
+    else:
+        suite_files_rel = SUITES[args.suite]
+
     _maybe_pin_update_weights_model_pair(suite_files_rel)
     suite_files_abs = []
     for f_rel in suite_files_rel:
@@ -121,8 +129,11 @@ def main():
         filter_expr = " or ".join(filters)
         logger.info(f"Filtering by case IDs: {args.case_ids}")
 
-    # Collect all test items (same as run_suite.py)
+    # Collect all test items and keep only testcase-based GT generators.
     all_test_items = collect_test_items(suite_files_abs, filter_expr=filter_expr)
+    all_test_items = [
+        item for item in all_test_items if "test_diffusion_generation[" in item
+    ]
 
     if not all_test_items:
         logger.warning(f"No test items found for suite '{args.suite}'.")
