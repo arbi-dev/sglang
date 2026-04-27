@@ -17,6 +17,8 @@ from typing import Any
 
 import torch
 import torch.nn as nn
+from tqdm.auto import tqdm
+
 from sglang.jit_kernel.nvfp4 import prewarm_nvfp4_jit_modules
 from sglang.multimodal_gen import envs
 from sglang.multimodal_gen.configs.pipeline_configs.base import ModelTaskType, STA_Mode
@@ -50,11 +52,11 @@ from sglang.multimodal_gen.runtime.distributed.parallel_state import (
     get_cfg_group,
     get_classifier_free_guidance_rank,
 )
+from sglang.multimodal_gen.runtime.layers.attention.selector import get_attn_backend
 from sglang.multimodal_gen.runtime.layers.attention.STA_configuration import (
     configure_sta,
     save_mask_search_results,
 )
-from sglang.multimodal_gen.runtime.layers.attention.selector import get_attn_backend
 from sglang.multimodal_gen.runtime.loader.component_loaders.transformer_loader import (
     TransformerLoader,
 )
@@ -91,7 +93,6 @@ from sglang.multimodal_gen.runtime.utils.perf_logger import StageProfiler
 from sglang.multimodal_gen.runtime.utils.profiler import SGLDiffusionProfiler
 from sglang.multimodal_gen.utils import dict_to_3d_list
 from sglang.srt.utils.common import get_compiler_backend
-from tqdm.auto import tqdm
 
 logger = init_logger(__name__)
 
@@ -546,8 +547,8 @@ class DenoisingStage(PipelineStage, RolloutDenoisingMixin):
         # Setup precision and autocast settings
         target_dtype = torch.bfloat16
         autocast_enabled = (
-                               target_dtype != torch.float32
-                           ) and not server_args.disable_autocast
+            target_dtype != torch.float32
+        ) and not server_args.disable_autocast
 
         # Prepare image latents and embeddings for I2V generation
         image_embeds = batch.image_embeds
@@ -1706,9 +1707,9 @@ class DenoisingStage(PipelineStage, RolloutDenoisingMixin):
 
         logger.info("STA_mode: %s", STA_mode)
         if (batch.num_frames, batch.height, batch.width) != (
-                69,
-                768,
-                1280,
+            69,
+            768,
+            1280,
         ) and STA_mode != "STA_inference":
             raise NotImplementedError(
                 "STA mask search/tuning is not supported for this resolution"
