@@ -111,6 +111,25 @@ def _jit_compress_module(
 
 
 @cache_once
+def _jit_compress_module_v2_defensive(
+    head_dim: int,
+    dtype_in: torch.dtype,
+    dtype_out: torch.dtype,
+) -> Module:
+    args = make_cpp_args(head_dim, dtype_in, dtype_out, is_arch_support_pdl())
+    kernel_class = f"FlashCompress128Kernel<{args}>"
+    return load_jit(
+        make_name("compress_128_v2_defensive"),
+        *args,
+        cuda_files=["deepseek_v4/c128_v2.cuh"],
+        cuda_wrappers=[
+            ("prefill", f"{kernel_class}::run_prefill"),
+        ],
+        extra_cuda_cflags=["-use_fast_math"],
+    )
+
+
+@cache_once
 def _jit_rmsnorm_head_module(head_dim: int, dtype: torch.dtype):
     args = make_cpp_args(head_dim, dtype, is_arch_support_pdl())
     kernel_class = f"RMSNormKernel<{args}>"
@@ -494,9 +513,24 @@ def compress_forward(
         out.dtype,
         compress_ratio,
     )
-    F = module.decode if isinstance(plan, CompressorDecodePlan) else module.prefill
+    if isinstance(plan, CompressorDecodePlan):
+        F = module.decode
+    elif compress_ratio == 128 and _should_use_c128_prefill_defensive():
+        F = _jit_compress_module_v2_defensive(
+            head_dim,
+            kv_score_input.dtype,
+            out.dtype,
+        ).prefill
+    else:
+        F = module.prefill
     F(kv_score_buffer, kv_score_input, out, ape, indices, *plan[1:], extra_data)
     return out
+
+
+def _should_use_c128_prefill_defensive() -> bool:
+    from sglang.srt.environ import envs
+
+    return envs.SGLANG_HANDLE_C128_PREFILL_KERNEL.get()
 
 
 def compress_fused_norm_rope_inplace(

@@ -1,4 +1,3 @@
-
 import weakref
 from typing import Optional
 
@@ -12,6 +11,7 @@ from sglang.srt.mem_cache.deepseekv4_memory_pool import (
     DeepSeekV4TokenToKVPool,
     HiSparseC4DevicePool,
 )
+from sglang.srt.utils.common import get_num_new_pages
 
 
 class DeepSeekV4SingleKVPoolHost:
@@ -252,9 +252,24 @@ class HiSparseTokenToKVPoolAllocator(BaseTokenToKVPoolAllocator):
         extend_num_tokens: int,
     ):
         assert self.page_size > 1
-        num_tokens = extend_num_tokens + len(seq_lens) * self.page_size
 
-        if num_tokens > self.available_size():
+        num_new_pages_logical = get_num_new_pages(
+            seq_lens=seq_lens_cpu, page_size=self.page_size, prefix_lens=prefix_lens_cpu
+        )
+        num_new_pages_hisparse = get_num_new_pages(
+            seq_lens=seq_lens_cpu // self.compress_ratio,
+            page_size=self.page_size,
+            prefix_lens=prefix_lens_cpu // self.compress_ratio,
+        )
+        if (
+            num_new_pages_logical
+            > self.logical_attn_allocator.available_size() // self.page_size
+        ):
+            return None
+        if (
+            num_new_pages_hisparse
+            > self.hisparse_attn_allocator.available_size() // self.page_size
+        ):
             return None
 
         logical_indices = self.logical_attn_allocator.alloc_extend(
