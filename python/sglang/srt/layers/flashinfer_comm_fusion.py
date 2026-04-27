@@ -275,9 +275,9 @@ def _preflight_check_workspace_memory(
     )
     if flag.item() == 0:
         logger.warning(
-            "FlashInfer workspace preflight: fabric probe failed on at "
-            "least one rank. Skipping allreduce fusion to avoid "
-            "cross-rank desync inside the flashinfer collective."
+            "FlashInfer workspace preflight: cuMemCreate probe failed on at "
+            "least one rank. Skipping allreduce fusion to avoid cross-rank "
+            "desync inside the flashinfer collective."
         )
         return False
     return True
