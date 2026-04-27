@@ -157,20 +157,15 @@ __global__ void grouped_topk_single_group_kernel(
     __syncwarp();
   }
 
-  // Phase 3: renormalize and write output
+  // Phase 3: renormalize and write output. All lanes named by the full-warp
+  // shuffle mask must execute warp_sum_f32 together; inactive lanes contribute
+  // the additive identity.
+  float weight = (lane_id < topk) ? selected_weights[lane_id] : 0.0f;
+  float divisor = renormalize ? warp_sum_f32(weight) + 1e-20f : 1.0f;
+
   if (lane_id < topk) {
-    float weight = selected_weights[lane_id];
-    float final_weight = weight * scaling_factor;
-
-    if (renormalize) {
-      // Warp-level sum of selected weights (only lanes < topk contribute)
-      float partial = (lane_id < topk) ? weight : 0.0f;
-      float total = warp_sum_f32(partial);
-      final_weight = weight * scaling_factor / (total + 1e-20f);
-    }
-
     out_ids[lane_id] = selected_ids[lane_id];
-    out_vals[lane_id] = final_weight;
+    out_vals[lane_id] = weight * scaling_factor / divisor;
   }
 }
 
