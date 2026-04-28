@@ -629,8 +629,6 @@ class ModelConfig:
         self.spec_hidden_size = (
             self.hidden_size * hc_mult
             if hc_mult > 1
-            and envs.SGLANG_FIX_MTP_HC_HIDDEN.get()
-            and envs.SGLANG_DSV4_MODE.get() == "2604"
             else self.hidden_size
         )
         self.num_hidden_layers = self.hf_text_config.num_hidden_layers
