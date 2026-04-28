@@ -1941,9 +1941,23 @@ class ModelRunner(ModelRunnerKVCacheMixin):
                 )
                 self.kv_cache_dtype = self.dtype
         else:
-            raise ValueError(
-                f"Unsupported kv_cache_dtype: {self.server_args.kv_cache_dtype}."
+            # Consult the external-plugin registry before erroring. Plugins
+            # (e.g. TQKV) may register a kv_cache_dtype string and a torch
+            # storage dtype via
+            # ``register_kv_cache_dtype(name, torch_dtype)`` exposed from
+            # sglang.srt.model_executor.model_runner_kv_cache_mixin.
+            from sglang.srt.model_executor.model_runner_kv_cache_mixin import (
+                resolve_external_kv_cache_dtype,
             )
+
+            torch_dtype = resolve_external_kv_cache_dtype(
+                self.server_args.kv_cache_dtype
+            )
+            if torch_dtype is None:
+                raise ValueError(
+                    f"Unsupported kv_cache_dtype: {self.server_args.kv_cache_dtype}."
+                )
+            self.kv_cache_dtype = torch_dtype
 
         log_info_on_rank0(logger, f"Using KV cache dtype: {self.kv_cache_dtype}")
 

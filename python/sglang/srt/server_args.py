@@ -146,6 +146,19 @@ ATTENTION_BACKEND_CHOICES = [
     "intel_amx",
     "ascend",
     "intel_xpu",
+    # External plugins
+    "tqkv",
+]
+
+KV_CACHE_DTYPE_CHOICES = [
+    "auto",
+    "fp8_e5m2",
+    "fp8_e4m3",
+    "bf16",
+    "bfloat16",
+    "fp4_e2m1",
+    # External plugins
+    "tqkv",
 ]
 
 LORA_BACKEND_CHOICES = ["triton", "csgmv", "ascend", "torch_native"]
@@ -241,6 +254,10 @@ def add_quantization_method_choices(choices):
 
 def add_attention_backend_choices(choices):
     ATTENTION_BACKEND_CHOICES.extend(choices)
+
+
+def add_kv_cache_dtype_choices(choices):
+    KV_CACHE_DTYPE_CHOICES.extend(choices)
 
 
 def add_disagg_transfer_backend_choices(choices):
@@ -3857,8 +3874,8 @@ class ServerArgs:
             "--kv-cache-dtype",
             type=str,
             default=ServerArgs.kv_cache_dtype,
-            choices=["auto", "fp8_e5m2", "fp8_e4m3", "bf16", "bfloat16", "fp4_e2m1"],
-            help='Data type for kv cache storage. "auto" will use model data type. "bf16" or "bfloat16" for BF16 KV cache. "fp8_e5m2" and "fp8_e4m3" are supported for CUDA 11.8+. "fp4_e2m1" (only mxfp4) is supported for CUDA 12.8+ and PyTorch 2.8.0+',
+            choices=KV_CACHE_DTYPE_CHOICES,
+            help='Data type for kv cache storage. "auto" will use model data type. "bf16" or "bfloat16" for BF16 KV cache. "fp8_e5m2" and "fp8_e4m3" are supported for CUDA 11.8+. "fp4_e2m1" (only mxfp4) is supported for CUDA 12.8+ and PyTorch 2.8.0+. "tqkv" is provided by an external plugin (see add_kv_cache_dtype_choices for adding more).',
         )
         parser.add_argument(
             "--enable-fp32-lm-head",

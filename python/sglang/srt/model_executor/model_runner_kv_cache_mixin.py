@@ -71,8 +71,84 @@ _is_npu = is_npu()
 _is_hip = is_hip()
 
 
+# ---------------------------------------------------------------------------
+# External-plugin registries for ``kv_cache_dtype``.
+#
+# These three hooks let an out-of-tree plugin (e.g. TQKV) participate in the
+# KV-cache-dtype machinery without monkey-patching:
+#
+#   1. ``register_kv_cache_dtype(name, torch_dtype)``
+#      Maps the ``--kv-cache-dtype`` CLI string to the ``torch.dtype`` that
+#      the runner stores on ``self.kv_cache_dtype``. Consulted by
+#      ``ModelRunner.configure_kv_cache_dtype`` for any value not in the
+#      built-in set.
+#
+#   2. ``register_kv_cache_cell_size(name, fn)``
+#      ``fn(runner, num_layers) -> int`` returns bytes-per-token for the
+#      auto-sizer (``profile_max_num_token``). The default branch assumes
+#      ``element_size(self.kv_cache_dtype) * num_kv_heads * (head_dim +
+#      v_head_dim) * num_layers`` which over-counts for packed formats.
+#      Registering an override lets the plugin report its true byte cost
+#      so ``max_total_num_tokens`` is sized correctly.
+#
+#   3. ``register_kv_pool_factory(name, factory)``
+#      ``factory(runner) -> KVCache`` returns the pool instance to install
+#      on ``runner.token_to_kv_pool``. Picked up *before* the default pool
+#      is built — no del/empty_cache hack required. Only the simple
+#      (non-MLA, non-NSA, non-SWA, non-mambaish, non-double-sparsity,
+#      non-Ascend) path consults the factory; plugins that need more
+#      coverage can register additional names or extend this hook.
+# ---------------------------------------------------------------------------
+
+_KV_CACHE_DTYPE_REGISTRY: dict = {}
+_KV_CACHE_CELL_SIZE_REGISTRY: dict = {}
+_KV_POOL_FACTORY_REGISTRY: dict = {}
+
+
+def register_kv_cache_dtype(name: str, torch_dtype: "torch.dtype") -> None:
+    """Register a string -> ``torch.dtype`` mapping for an external KV-cache
+    storage format. See module docstring."""
+    _KV_CACHE_DTYPE_REGISTRY[name] = torch_dtype
+
+
+def register_kv_cache_cell_size(name: str, fn) -> None:
+    """Register a ``(runner, num_layers) -> bytes_per_token`` callback for
+    the KV-cache auto-sizer."""
+    _KV_CACHE_CELL_SIZE_REGISTRY[name] = fn
+
+
+def register_kv_pool_factory(name: str, factory) -> None:
+    """Register a ``(runner) -> KVCache`` factory invoked from
+    ``_init_pools`` on the simple (non-MLA / non-NSA / non-SWA) path."""
+    _KV_POOL_FACTORY_REGISTRY[name] = factory
+
+
+def resolve_external_kv_cache_dtype(name: str):
+    """Return the registered ``torch.dtype`` for ``name`` or ``None``."""
+    return _KV_CACHE_DTYPE_REGISTRY.get(name)
+
+
+def resolve_external_kv_cache_cell_size(name: str):
+    return _KV_CACHE_CELL_SIZE_REGISTRY.get(name)
+
+
+def resolve_external_kv_pool_factory(name: str):
+    return _KV_POOL_FACTORY_REGISTRY.get(name)
+
+
 class ModelRunnerKVCacheMixin:
     def get_cell_size_per_token(self: ModelRunner, num_layers: int) -> int:
+        # Honour external-plugin cell-size overrides before the built-in
+        # branches. The auto-sizer assumes element_size(kv_cache_dtype) ×
+        # heads × dims × num_layers, which over-counts for packed formats
+        # (e.g. K4V4 stored as uint8). Plugins register the true cost via
+        # ``register_kv_cache_cell_size``.
+        external_fn = resolve_external_kv_cache_cell_size(
+            self.server_args.kv_cache_dtype
+        )
+        if external_fn is not None:
+            return external_fn(self, num_layers)
+
         kv_size = torch._utils._element_size(self.kv_cache_dtype)
         if self.use_mla_backend:
             cell_size = (
@@ -473,9 +549,26 @@ class ModelRunnerKVCacheMixin:
             # Draft worker shares req_to_token_pool with the target worker.
             assert self.is_draft_worker
 
-        # Initialize token_to_kv_pool
+        # Initialize token_to_kv_pool.
+        #
+        # External-plugin pool factories take precedence over the built-in
+        # branches so the default pool is never allocated and freed (which
+        # the caching allocator does not fully release back to CUDA — small
+        # plugin pools were OOM'ing on the second allocation). The factory
+        # owns the full pool constructor arg set; the standard allocator-
+        # init block below picks up ``self.token_to_kv_pool`` as usual.
+        external_factory = resolve_external_kv_pool_factory(
+            self.server_args.kv_cache_dtype
+        )
+        _external_pool_built = False
+        if external_factory is not None:
+            self.token_to_kv_pool = external_factory(self)
+            _external_pool_built = True
+
         is_nsa_model = is_deepseek_nsa(self.model_config.hf_config)
-        if self.server_args.attention_backend == "ascend" and not self.mambaish_config:
+        if _external_pool_built:
+            pass  # plugin built it; skip built-in branches
+        elif self.server_args.attention_backend == "ascend" and not self.mambaish_config:
             if self.is_hybrid_swa:
                 from sglang.srt.hardware_backend.npu.memory_pool_npu import (
                     NPUMHATokenToKVPool,
