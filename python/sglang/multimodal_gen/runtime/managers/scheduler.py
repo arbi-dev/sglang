@@ -463,9 +463,7 @@ class Scheduler(SchedulerDisaggMixin):
 
             try:
                 first_req = reqs[0]
-                is_warmup = (
-                    first_req.is_warmup if isinstance(first_req, Req) else False
-                )
+                is_warmup = first_req.is_warmup if isinstance(first_req, Req) else False
 
                 handler = self.request_handlers.get(type(first_req))
                 if handler:

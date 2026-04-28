@@ -61,8 +61,8 @@ from sglang.multimodal_gen.runtime.loader.component_loaders.transformer_loader i
     TransformerLoader,
 )
 from sglang.multimodal_gen.runtime.managers.component_manager import (
-    ComponentUse,
     DIT_HANDOFF_SLOT,
+    ComponentUse,
 )
 from sglang.multimodal_gen.runtime.managers.forward_context import set_forward_context
 from sglang.multimodal_gen.runtime.pipelines_core.schedule_batch import Req

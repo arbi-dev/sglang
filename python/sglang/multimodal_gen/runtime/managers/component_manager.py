@@ -35,7 +35,7 @@ class ComponentUse:
 @dataclass(slots=True)
 class ResidencyState:
     """
-     Necessary internal runtime info of ComponentResidencyManager
+    Necessary internal runtime info of ComponentResidencyManager
     """
 
     stages: Sequence["ComponentResidencyStage"] = ()
@@ -56,8 +56,7 @@ class ResidencyBatch(Protocol):
 class ComponentResidencyStage(Protocol):
     def component_uses(
         self, server_args: ServerArgs, stage_name: str | None = None
-    ) -> list[ComponentUse]:
-        ...
+    ) -> list[ComponentUse]: ...
 
 
 class ComponentResidencyPipeline(Protocol):
@@ -556,9 +555,10 @@ class ComponentResidencyManager:
             return None
         return self.stage_name(self.state.stages[next_index])
 
-    def _future_uses(self, start_index: int) -> tuple[ComponentUse, ...]:
+    def _future_uses(self, start_stage_index: int) -> tuple[ComponentUse, ...]:
+        """Returns the component uses in the future stages"""
         uses: list[ComponentUse] = []
-        for index in range(start_index, len(self._stage_uses_by_index)):
+        for index in range(start_stage_index, len(self._stage_uses_by_index)):
             uses.extend(self._stage_uses_by_index[index])
         return tuple(uses)
 

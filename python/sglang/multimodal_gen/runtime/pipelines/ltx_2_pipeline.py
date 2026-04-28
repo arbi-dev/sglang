@@ -885,9 +885,7 @@ class LTX2TwoStagePipeline(_BaseLTX2Pipeline):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._ltx2_residency = LTX2TwoStageResidencyController(
-            self, self.server_args
-        )
+        self._ltx2_residency = LTX2TwoStageResidencyController(self, self.server_args)
         self._use_premerged_stage2_transformer = (
             self._ltx2_residency.should_use_premerged
         )
