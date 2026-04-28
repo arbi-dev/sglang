@@ -23,12 +23,11 @@ static constexpr int WARP_SIZE = 32;
 static constexpr int MAX_TOPK = 8;
 
 // Pack (value, index) into a single uint64_t for warp-level max reduction.
-// Uses IEEE 754 bit-trick: float bits are order-preserving for positive values.
-// Since sigmoid + positive bias yields non-negative scores, this works correctly.
+// Transform IEEE 754 bits into an unsigned ordering that is monotonic for the
+// full float range; correction bias can make sigmoid(score) + bias negative.
 __device__ __forceinline__ uint64_t pack_val_idx(float val, int32_t idx) {
   uint32_t val_bits = __float_as_uint(val);
-  // Flip sign bit so that comparison works for all floats
-  val_bits ^= ((val_bits >> 31) | 0x80000000u);
+  val_bits ^= (val_bits & 0x80000000u) ? 0xffffffffu : 0x80000000u;
   // Use (65535 - idx) so that smaller indices win ties
   uint32_t idx_bits = static_cast<uint32_t>(65535 - idx);
   return (static_cast<uint64_t>(val_bits) << 32) | idx_bits;
@@ -38,8 +37,7 @@ __device__ __forceinline__ void unpack_val_idx(uint64_t packed, float& val, int3
   uint32_t idx_bits = static_cast<uint32_t>(packed & 0xFFFFFFFF);
   idx = static_cast<int32_t>(65535 - idx_bits);
   uint32_t val_bits = static_cast<uint32_t>(packed >> 32);
-  // Undo the sign-bit flip
-  val_bits ^= (~(val_bits >> 31) | 0x80000000u);
+  val_bits ^= (val_bits & 0x80000000u) ? 0x80000000u : 0xffffffffu;
   val = __uint_as_float(val_bits);
 }
 

@@ -137,6 +137,42 @@ def test_grouped_topk_non_power_of_two_renormalize(topk: int) -> None:
     )
 
 
+def test_grouped_topk_negative_choice_scores_match_reference() -> None:
+    hidden_states, gating_output, correction_bias = _make_inputs(
+        num_tokens=64, num_experts=128, seed=23758
+    )
+    correction_bias.fill_(-2.0)
+
+    topk_weights, topk_ids = jit_grouped_topk(
+        gating_output,
+        correction_bias,
+        1,
+        1,
+        6,
+        True,
+        1.0,
+    )
+    ref_weights, ref_ids = biased_grouped_topk_impl(
+        hidden_states,
+        gating_output,
+        correction_bias,
+        6,
+        True,
+        1,
+        1,
+        routed_scaling_factor=1.0,
+        apply_routed_scaling_factor_on_output=True,
+    )
+    torch.cuda.synchronize()
+
+    torch.testing.assert_close(
+        _scatter_by_expert(topk_weights, topk_ids, 128),
+        _scatter_by_expert(ref_weights, ref_ids, 128),
+        rtol=1e-5,
+        atol=1e-6,
+    )
+
+
 def test_grouped_topk_without_renormalize_matches_reference() -> None:
     hidden_states, gating_output, correction_bias = _make_inputs(
         num_tokens=64, num_experts=128, seed=3006
