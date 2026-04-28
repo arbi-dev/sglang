@@ -25,7 +25,7 @@ RUN pip install -e /workspace/sglang/python/
 RUN pip uninstall -y deep-gemm deep_gemm 2>/dev/null; \
     cd /tmp && rm -rf DeepGEMM && \
     git clone https://github.com/sgl-project/DeepGEMM.git -b release && \
-    cd DeepGEMM && git checkout 7f2a70 && \
+    cd DeepGEMM && git checkout 2e2174 && \
     git submodule update --init --recursive && \
     bash install.sh
 
