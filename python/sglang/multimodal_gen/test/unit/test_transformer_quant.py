@@ -167,9 +167,9 @@ class TestTransformerQuantHelpers(unittest.TestCase):
                     "org/repo", validate_safetensors_shards=True
                 )
 
-        self.assertEqual(resolved, snapshot_dir)
-        self.assertTrue(os.path.exists(os.path.join(snapshot_dir, shard_name)))
-        self.assertEqual(mock_snapshot_download.call_count, 2)
+            self.assertEqual(resolved, snapshot_dir)
+            self.assertTrue(os.path.exists(os.path.join(snapshot_dir, shard_name)))
+            self.assertEqual(mock_snapshot_download.call_count, 2)
 
     def test_filter_transformer_precision_variants_prefers_canonical_file(self):
         files = [
