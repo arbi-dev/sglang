@@ -28,7 +28,7 @@ OPTIONAL_DEPS="${1:-}"
 # Build python extras
 EXTRAS="dev_hip,tracing"
 if [ -n "$OPTIONAL_DEPS" ]; then
-    EXTRAS="dev_hip,${OPTIONAL_DEPS}"
+    EXTRAS="dev_hip,tracing,${OPTIONAL_DEPS}"
 fi
 echo "Installing python extras: [${EXTRAS}]"
 
