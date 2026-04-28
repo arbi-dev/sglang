@@ -16,15 +16,15 @@ import os
 import sys
 from pathlib import Path
 
-from partitioning import PartitionItem, partition_items_by_lpt
-
 from sglang.multimodal_gen.runtime.utils.logging_utils import init_logger
 from sglang.multimodal_gen.test.run_suite import (
     SUITES,
+    PartitionItem,
     _maybe_pin_update_weights_model_pair,
     collect_test_items,
     get_case_est_time,
     get_suite_files_rel,
+    partition_items_by_lpt,
     run_pytest,
 )
 
