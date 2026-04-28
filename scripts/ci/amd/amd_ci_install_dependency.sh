@@ -26,7 +26,7 @@ done
 OPTIONAL_DEPS="${1:-}"
 
 # Build python extras
-EXTRAS="dev_hip"
+EXTRAS="dev_hip,tracing"
 if [ -n "$OPTIONAL_DEPS" ]; then
     EXTRAS="dev_hip,${OPTIONAL_DEPS}"
 fi
