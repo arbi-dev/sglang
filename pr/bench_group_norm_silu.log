@@ -1,0 +1,4 @@
+| case | dtype | shape | native_us | fused_us | speedup |
+|---|---|---|---:|---:|---:|
+| threshold_3d | bf16 | 1x128x1x256x256 | 254.14 | 48.50 | 5.241x |
+| hunyuan_video_large | bf16 | 1x128x20x256x256 | 4714.42 | 259.66 | 18.156x |

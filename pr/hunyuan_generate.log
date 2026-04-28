@@ -1,0 +1,86 @@
+[04-28 12:49:57] server_args: {"model_path": "hunyuanvideo-community/HunyuanVideo", "model_id": null, "backend": "auto", "attention_backend": null, "attention_backend_config": {}, "cache_dit_config": null, "nccl_port": null, "trust_remote_code": false, "revision": null, "num_gpus": 1, "tp_size": 1, "sp_degree": 1, "ulysses_degree": 1, "ring_degree": 1, "dp_size": 1, "dp_degree": 1, "enable_cfg_parallel": false, "hsdp_replicate_dim": 1, "hsdp_shard_dim": 1, "dist_timeout": 3600, "pipeline_class_name": null, "lora_path": null, "lora_nickname": "default", "lora_scale": 1.0, "lora_weight_name": null, "component_paths": {}, "transformer_weights_path": null, "lora_target_modules": null, "dit_cpu_offload": true, "dit_layerwise_offload": null, "dit_offload_prefetch_size": 0.0, "text_encoder_cpu_offload": true, "image_encoder_cpu_offload": true, "vae_cpu_offload": true, "use_fsdp_inference": false, "pin_cpu_memory": true, "ltx2_two_stage_device_mode": null, "comfyui_mode": false, "enable_torch_compile": false, "warmup": false, "warmup_resolutions": null, "warmup_steps": 1, "disable_autocast": false, "master_port": 30005, "host": "127.0.0.1", "port": 30000, "webui": false, "webui_port": 12312, "scheduler_port": 5635, "strict_ports": false, "output_path": "outputs/", "input_save_path": "inputs/uploads", "prompt_file_path": null, "model_paths": {}, "model_loaded": {"transformer": true, "vae": true, "video_vae": true, "audio_vae": true, "video_dit": true, "audio_dit": true, "dual_tower_bridge": true}, "boundary_ratio": null, "base_gpu_id": 0, "disagg_role": "monolithic", "disagg_timeout": 600, "disagg_dispatch_policy": "round_robin", "disagg_mode": false, "disagg_server_addr": null, "encoder_urls": null, "denoiser_urls": null, "decoder_urls": null, "encoder_tp": null, "denoiser_tp": null, "denoiser_sp": null, "denoiser_ulysses": null, "denoiser_ring": null, "decoder_tp": null, "disagg_transfer_pool_size": 268435456, "disagg_p2p_hostname": "127.0.0.1", "disagg_ib_device": null, "pool_work_endpoint": null, "pool_result_endpoint": null, "log_level": "info", "uvicorn_access_log_exclude_prefixes": [], "enable_trace": false, "otlp_traces_endpoint": "localhost:4317"}
+[04-28 12:49:57] Local mode: True
+[04-28 12:49:57] Starting server...
+[04-28 12:50:06] Scheduler bind at endpoint: tcp://127.0.0.1:5635
+[04-28 12:50:06] Initializing distributed environment with world_size=1, device=cuda:0, timeout=3600
+[04-28 12:50:06] Setting distributed timeout to 3600 seconds
+[04-28 12:50:07] No pipeline_class_name specified, using model_index.json
+[04-28 12:50:07] Using pipeline from model_index.json: HunyuanVideoPipeline
+[04-28 12:50:07] Loading pipeline modules...
+[04-28 12:50:07] Checking for cached model in HF Hub cache for hunyuanvideo-community/HunyuanVideo...
+[04-28 12:50:07] Found complete model in cache at /root/.cache/huggingface/hub/models--hunyuanvideo-community--HunyuanVideo/snapshots/e8c2aaa66fe3742a32c11a6766aecbf07c56e773
+[04-28 12:50:07] Model path: /root/.cache/huggingface/hub/models--hunyuanvideo-community--HunyuanVideo/snapshots/e8c2aaa66fe3742a32c11a6766aecbf07c56e773
+[04-28 12:50:07] Diffusers version: 0.32.0.dev0
+[04-28 12:50:07] Loading pipeline modules from config: {'_class_name': 'HunyuanVideoPipeline', '_diffusers_version': '0.32.0.dev0', 'scheduler': ['diffusers', 'FlowMatchEulerDiscreteScheduler'], 'text_encoder': ['transformers', 'LlamaModel'], 'text_encoder_2': ['transformers', 'CLIPTextModel'], 'tokenizer': ['transformers', 'LlamaTokenizerFast'], 'tokenizer_2': ['transformers', 'CLIPTokenizer'], 'transformer': ['diffusers', 'HunyuanVideoTransformer3DModel'], 'vae': ['diffusers', 'AutoencoderKLHunyuanVideo']}
+[04-28 12:50:07] Loading required components: ['text_encoder', 'text_encoder_2', 'tokenizer', 'tokenizer_2', 'vae', 'transformer', 'scheduler']
+Loading required modules:   0%|          | 0/7 [00:00<?, ?it/s][04-28 12:50:07] Loading text_encoder from /root/.cache/huggingface/hub/models--hunyuanvideo-community--HunyuanVideo/snapshots/e8c2aaa66fe3742a32c11a6766aecbf07c56e773/text_encoder. avail mem: 133.80 GB
+[04-28 12:50:07] Using FlashAttention (FA3 for hopper, FA4 for blackwell) backend
+[04-28 12:50:10] [RunAI Streamer] Overall time to stream 14.0 GiB of all files to cpu: 2.46s, 5.7 GiB/s
+[04-28 12:50:32] Loaded text_encoder: FSDPLlamaModel (sgl-diffusion version). model size: 13.98 GB, consumed GPU mem: 0.81 GB, avail GPU mem: 132.99 GB
+Loading required modules:  14%|█▍        | 1/7 [00:24<02:28, 24.82s/it][04-28 12:50:32] Loading text_encoder_2 from /root/.cache/huggingface/hub/models--hunyuanvideo-community--HunyuanVideo/snapshots/e8c2aaa66fe3742a32c11a6766aecbf07c56e773/text_encoder_2. avail mem: 132.99 GB
+[04-28 12:50:33] Using Torch SDPA backend
+[04-28 12:50:33] [RunAI Streamer] Overall time to stream 234.7 MiB of all files to cpu: 0.04s, 6.0 GiB/s
+[04-28 12:50:34] Loaded text_encoder_2: FSDPCLIPTextModel (sgl-diffusion version). model size: 0.23 GB, consumed GPU mem: 0.76 GB, avail GPU mem: 132.23 GB
+Loading required modules:  29%|██▊       | 2/7 [00:26<00:56, 11.22s/it][04-28 12:50:34] Loading tokenizer from /root/.cache/huggingface/hub/models--hunyuanvideo-community--HunyuanVideo/snapshots/e8c2aaa66fe3742a32c11a6766aecbf07c56e773/tokenizer. avail mem: 132.23 GB
+[04-28 12:50:35] Loaded tokenizer: LlamaTokenizer (sgl-diffusion version). model size: NA GB, consumed GPU mem: 0.00 GB, avail GPU mem: 132.23 GB
+Loading required modules:  43%|████▎     | 3/7 [00:27<00:26,  6.63s/it][04-28 12:50:35] Loading tokenizer_2 from /root/.cache/huggingface/hub/models--hunyuanvideo-community--HunyuanVideo/snapshots/e8c2aaa66fe3742a32c11a6766aecbf07c56e773/tokenizer_2. avail mem: 132.23 GB
+[04-28 12:50:35] Loaded tokenizer_2: CLIPTokenizer (sgl-diffusion version). model size: NA GB, consumed GPU mem: 0.00 GB, avail GPU mem: 132.23 GB
+[04-28 12:50:35] Loading vae from /root/.cache/huggingface/hub/models--hunyuanvideo-community--HunyuanVideo/snapshots/e8c2aaa66fe3742a32c11a6766aecbf07c56e773/vae. avail mem: 132.23 GB
+[93m[04-28 12:50:35] VAE unexpected keys: ['encoder.conv_in.conv.bias', 'encoder.conv_in.conv.weight', 'encoder.conv_norm_out.bias', 'encoder.conv_norm_out.weight', 'encoder.conv_out.conv.bias', 'encoder.conv_out.conv.weight', 'encoder.down_blocks.0.downsamplers.0.conv.conv.bias', 'encoder.down_blocks.0.downsamplers.0.conv.conv.weight', 'encoder.down_blocks.0.resnets.0.conv1.conv.bias', 'encoder.down_blocks.0.resnets.0.conv1.conv.weight', 'encoder.down_blocks.0.resnets.0.conv2.conv.bias', 'encoder.down_blocks.0.resnets.0.conv2.conv.weight', 'encoder.down_blocks.0.resnets.0.norm1.bias', 'encoder.down_blocks.0.resnets.0.norm1.weight', 'encoder.down_blocks.0.resnets.0.norm2.bias', 'encoder.down_blocks.0.resnets.0.norm2.weight', 'encoder.down_blocks.0.resnets.1.conv1.conv.bias', 'encoder.down_blocks.0.resnets.1.conv1.conv.weight', 'encoder.down_blocks.0.resnets.1.conv2.conv.bias', 'encoder.down_blocks.0.resnets.1.conv2.conv.weight', 'encoder.down_blocks.0.resnets.1.norm1.bias', 'encoder.down_blocks.0.resnets.1.norm1.weight', 'encoder.down_blocks.0.resnets.1.norm2.bias', 'encoder.down_blocks.0.resnets.1.norm2.weight', 'encoder.down_blocks.1.downsamplers.0.conv.conv.bias', 'encoder.down_blocks.1.downsamplers.0.conv.conv.weight', 'encoder.down_blocks.1.resnets.0.conv1.conv.bias', 'encoder.down_blocks.1.resnets.0.conv1.conv.weight', 'encoder.down_blocks.1.resnets.0.conv2.conv.bias', 'encoder.down_blocks.1.resnets.0.conv2.conv.weight', 'encoder.down_blocks.1.resnets.0.conv_shortcut.conv.bias', 'encoder.down_blocks.1.resnets.0.conv_shortcut.conv.weight', 'encoder.down_blocks.1.resnets.0.norm1.bias', 'encoder.down_blocks.1.resnets.0.norm1.weight', 'encoder.down_blocks.1.resnets.0.norm2.bias', 'encoder.down_blocks.1.resnets.0.norm2.weight', 'encoder.down_blocks.1.resnets.1.conv1.conv.bias', 'encoder.down_blocks.1.resnets.1.conv1.conv.weight', 'encoder.down_blocks.1.resnets.1.conv2.conv.bias', 'encoder.down_blocks.1.resnets.1.conv2.conv.weight', 'encoder.down_blocks.1.resnets.1.norm1.bias', 'encoder.down_blocks.1.resnets.1.norm1.weight', 'encoder.down_blocks.1.resnets.1.norm2.bias', 'encoder.down_blocks.1.resnets.1.norm2.weight', 'encoder.down_blocks.2.downsamplers.0.conv.conv.bias', 'encoder.down_blocks.2.downsamplers.0.conv.conv.weight', 'encoder.down_blocks.2.resnets.0.conv1.conv.bias', 'encoder.down_blocks.2.resnets.0.conv1.conv.weight', 'encoder.down_blocks.2.resnets.0.conv2.conv.bias', 'encoder.down_blocks.2.resnets.0.conv2.conv.weight', 'encoder.down_blocks.2.resnets.0.conv_shortcut.conv.bias', 'encoder.down_blocks.2.resnets.0.conv_shortcut.conv.weight', 'encoder.down_blocks.2.resnets.0.norm1.bias', 'encoder.down_blocks.2.resnets.0.norm1.weight', 'encoder.down_blocks.2.resnets.0.norm2.bias', 'encoder.down_blocks.2.resnets.0.norm2.weight', 'encoder.down_blocks.2.resnets.1.conv1.conv.bias', 'encoder.down_blocks.2.resnets.1.conv1.conv.weight', 'encoder.down_blocks.2.resnets.1.conv2.conv.bias', 'encoder.down_blocks.2.resnets.1.conv2.conv.weight', 'encoder.down_blocks.2.resnets.1.norm1.bias', 'encoder.down_blocks.2.resnets.1.norm1.weight', 'encoder.down_blocks.2.resnets.1.norm2.bias', 'encoder.down_blocks.2.resnets.1.norm2.weight', 'encoder.down_blocks.3.resnets.0.conv1.conv.bias', 'encoder.down_blocks.3.resnets.0.conv1.conv.weight', 'encoder.down_blocks.3.resnets.0.conv2.conv.bias', 'encoder.down_blocks.3.resnets.0.conv2.conv.weight', 'encoder.down_blocks.3.resnets.0.norm1.bias', 'encoder.down_blocks.3.resnets.0.norm1.weight', 'encoder.down_blocks.3.resnets.0.norm2.bias', 'encoder.down_blocks.3.resnets.0.norm2.weight', 'encoder.down_blocks.3.resnets.1.conv1.conv.bias', 'encoder.down_blocks.3.resnets.1.conv1.conv.weight', 'encoder.down_blocks.3.resnets.1.conv2.conv.bias', 'encoder.down_blocks.3.resnets.1.conv2.conv.weight', 'encoder.down_blocks.3.resnets.1.norm1.bias', 'encoder.down_blocks.3.resnets.1.norm1.weight', 'encoder.down_blocks.3.resnets.1.norm2.bias', 'encoder.down_blocks.3.resnets.1.norm2.weight', 'encoder.mid_block.attentions.0.group_norm.bias', 'encoder.mid_block.attentions.0.group_norm.weight', 'encoder.mid_block.attentions.0.to_k.bias', 'encoder.mid_block.attentions.0.to_k.weight', 'encoder.mid_block.attentions.0.to_out.0.bias', 'encoder.mid_block.attentions.0.to_out.0.weight', 'encoder.mid_block.attentions.0.to_q.bias', 'encoder.mid_block.attentions.0.to_q.weight', 'encoder.mid_block.attentions.0.to_v.bias', 'encoder.mid_block.attentions.0.to_v.weight', 'encoder.mid_block.resnets.0.conv1.conv.bias', 'encoder.mid_block.resnets.0.conv1.conv.weight', 'encoder.mid_block.resnets.0.conv2.conv.bias', 'encoder.mid_block.resnets.0.conv2.conv.weight', 'encoder.mid_block.resnets.0.norm1.bias', 'encoder.mid_block.resnets.0.norm1.weight', 'encoder.mid_block.resnets.0.norm2.bias', 'encoder.mid_block.resnets.0.norm2.weight', 'encoder.mid_block.resnets.1.conv1.conv.bias', 'encoder.mid_block.resnets.1.conv1.conv.weight', 'encoder.mid_block.resnets.1.conv2.conv.bias', 'encoder.mid_block.resnets.1.conv2.conv.weight', 'encoder.mid_block.resnets.1.norm1.bias', 'encoder.mid_block.resnets.1.norm1.weight', 'encoder.mid_block.resnets.1.norm2.bias', 'encoder.mid_block.resnets.1.norm2.weight', 'quant_conv.bias', 'quant_conv.weight'][0;0m
+[04-28 12:50:35] Loaded vae: AutoencoderKLHunyuanVideo (sgl-diffusion version). model size: 0.27 GB, consumed GPU mem: 0.00 GB, avail GPU mem: 132.23 GB
+[04-28 12:50:35] Loading transformer from /root/.cache/huggingface/hub/models--hunyuanvideo-community--HunyuanVideo/snapshots/e8c2aaa66fe3742a32c11a6766aecbf07c56e773/transformer. avail mem: 132.23 GB
+[04-28 12:50:35] Loading HunyuanVideoTransformer3DModel from 6 safetensors file(s) , param_dtype: torch.bfloat16
+[04-28 12:50:35] Using FlashAttention (FA3 for hopper, FA4 for blackwell) backend
+[04-28 12:50:35] Using FlashAttention (FA3 for hopper, FA4 for blackwell) backend
+[04-28 12:50:37] [RunAI Streamer] Overall time to stream 23.9 GiB of all files to cpu: 2.22s, 10.7 GiB/s
+[04-28 12:50:59] Loaded model with 12.82B parameters
+[04-28 12:50:59] Loaded transformer: HunyuanVideoTransformer3DModel (sgl-diffusion version). model size: 23.88 GB, consumed GPU mem: 0.00 GB, avail GPU mem: 132.23 GB
+Loading required modules:  86%|████████▌ | 6/7 [00:51<00:07,  7.47s/it][04-28 12:50:59] Loading scheduler from /root/.cache/huggingface/hub/models--hunyuanvideo-community--HunyuanVideo/snapshots/e8c2aaa66fe3742a32c11a6766aecbf07c56e773/scheduler. avail mem: 132.23 GB
+[04-28 12:50:59] Loaded scheduler: FlowMatchEulerDiscreteScheduler (sgl-diffusion version). model size: NA GB, consumed GPU mem: 0.00 GB, avail GPU mem: 132.23 GB
+Loading required modules: 100%|██████████| 7/7 [00:51<00:00,  7.34s/it]
+[04-28 12:50:59] Creating pipeline stages...
+[04-28 12:50:59] Using FlashAttention (FA3 for hopper, FA4 for blackwell) backend
+[04-28 12:50:59] Pipeline instantiated
+[04-28 12:50:59] Worker 0: Initialized device, model, and distributed environment.
+[04-28 12:50:59] Worker 0: Scheduler loop started.
+[93m[04-28 12:50:59] Unsupported resolution: 320x192, output quality may suffer. Supported resolutions: 960x544, 544x960, 832x624, 624x832, 720x720, 1280x720, 720x1280, 832x1104, 1104x832, 960x960[0;0m
+[04-28 12:50:59] Adjusting number of frames from 9 to 9 based on model
+[04-28 12:50:59] Processing 1 grouped request(s)
+[04-28 12:50:59] Sampling params:
+                       width: 320
+                      height: 192
+                  num_frames: 9
+                         fps: 24
+                      prompt: <redacted, len=52>
+                  neg_prompt: <redacted, len=392>
+                        seed: 2026
+                 infer_steps: 2
+      num_outputs_per_prompt: 1
+              guidance_scale: 1.0
+     embedded_guidance_scale: 6
+                    n_tokens: None
+                  flow_shift: 7
+                  image_path: None
+                 save_output: True
+            output_file_path: /tmp/group_norm_silu_pr_artifacts/pr/hunyuan_group_norm_silu_pr.mp4
+        
+[04-28 12:50:59] Running pipeline stages: ['InputValidationStage', 'prompt_encoding_stage_primary', 'TimestepPreparationStage', 'LatentPreparationStage', 'DenoisingStage', 'DecodingStage']
+[04-28 12:50:59] [InputValidationStage] started...
+[04-28 12:50:59] [InputValidationStage] finished in 0.0001 seconds
+[04-28 12:50:59] [TextEncodingStage] started...
+[04-28 12:51:05] [TextEncodingStage] finished in 6.1637 seconds
+[04-28 12:51:05] [TimestepPreparationStage] started...
+[04-28 12:51:05] [TimestepPreparationStage] finished in 0.0004 seconds
+[04-28 12:51:05] [LatentPreparationStage] started...
+[04-28 12:51:05] [LatentPreparationStage] finished in 0.0010 seconds
+[04-28 12:51:05] [DenoisingStage] started...
+  0%|          | 0/2 [00:00<?, ?it/s] 50%|█████     | 1/2 [00:06<00:06,  6.83s/it]100%|██████████| 2/2 [00:06<00:00,  3.45s/it]
+[04-28 12:51:12] [DenoisingStage] average time per step: 3.4499 seconds
+[04-28 12:51:12] [DenoisingStage] finished in 6.9036 seconds
+[04-28 12:51:12] [DecodingStage] started...
+[04-28 12:51:12] [DecodingStage] finished in 0.6586 seconds
+[04-28 12:51:13] Output saved to [1;36m/tmp/group_norm_silu_pr_artifacts/pr/hunyuan_group_norm_silu_pr.mp4[0;0m
+[04-28 12:51:13] Pixel data generated successfully in [92m13.98[0;0m seconds
+[04-28 12:51:13] Completed batch processing. Generated 1 outputs in [92m13.98[0;0m seconds
+[93m[04-28 12:51:13] Generator was garbage collected without being shut down. Attempting to shut down the local server and client.[0;0m
+[04-28 12:51:19] Worker 0: Shutdown complete.
