@@ -329,7 +329,7 @@ class LTX2Pipeline(_BaseLTX2Pipeline):
 class LTX2TwoStageResidencyStrategy(ComponentResidencyStrategy):
     name = "ltx2_original"
 
-    def __init__(self, manager: "LTX2TwoStageDeviceManager") -> None:
+    def __init__(self, manager: "LTX2TwoStageResidencyController") -> None:
         self.manager = manager
 
     @property
@@ -459,7 +459,7 @@ class LTX2SnapshotResidencyStrategy(LTX2TwoStageResidencyStrategy):
 
     name = "ltx2_snapshot"
 
-    def __init__(self, manager: "LTX2TwoStageDeviceManager") -> None:
+    def __init__(self, manager: "LTX2TwoStageResidencyController") -> None:
         super().__init__(manager)
         self._cpu_param_snapshots: dict[str, dict[str, torch.Tensor]] = {}
         self._cpu_buffer_snapshots: dict[str, dict[str, torch.Tensor]] = {}
@@ -772,11 +772,11 @@ class LTX2SnapshotResidencyStrategy(LTX2TwoStageResidencyStrategy):
         self.manager._active_phase = "stage1"
 
 
-class LTX2TwoStageDeviceManager:
+class LTX2TwoStageResidencyController:
     """
-    Device residency manager for LTX-2.3 two-stage DiT switching.
-    It provides the LTX2 ComponentResidencyStrategy selected by
-    ComponentResidencyManager.
+    LTX-2.3 two-stage residency controller.
+    It builds the selected LTX2 ComponentResidencyStrategy and keeps the
+    thin stage adapter methods that are specific to two-stage upsample/LoRA flow.
 
     Modes:
     - resident: keep both DiTs on GPU; phase switch is pointer rebinding only.
@@ -813,8 +813,8 @@ class LTX2TwoStageDeviceManager:
             return LTX2ResidentResidencyStrategy(self)
         return LTX2OriginalResidencyStrategy(self)
 
-    def strategy_for_component(self, component_name: str) -> ComponentResidencyStrategy:
-        del component_name
+    @property
+    def strategy(self) -> ComponentResidencyStrategy:
         return self._strategy
 
     @property
@@ -885,11 +885,20 @@ class LTX2TwoStagePipeline(_BaseLTX2Pipeline):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._device_manager = LTX2TwoStageDeviceManager(self, self.server_args)
-        self._use_premerged_stage2_transformer = (
-            self._device_manager.should_use_premerged
+        self._ltx2_residency = LTX2TwoStageResidencyController(
+            self, self.server_args
         )
-        self._device_manager.initialize()
+        self._use_premerged_stage2_transformer = (
+            self._ltx2_residency.should_use_premerged
+        )
+        self._ltx2_residency.initialize()
+        if self._use_premerged_stage2_transformer:
+            self.component_residency_strategies["transformer"] = (
+                self._ltx2_residency.strategy
+            )
+            self.component_residency_strategies["transformer_2"] = (
+                self._ltx2_residency.strategy
+            )
 
     @staticmethod
     def _should_merge_stage2_distilled_lora(server_args: ServerArgs) -> bool:
@@ -955,10 +964,16 @@ class LTX2TwoStagePipeline(_BaseLTX2Pipeline):
         )
 
     def should_skip_ltx2_lora_switch_stage(self) -> bool:
-        return self._use_premerged_stage2_transformer and self._device_manager.mode in (
+        return self._use_premerged_stage2_transformer and self._ltx2_residency.mode in (
             "snapshot",
             "resident",
         )
+
+    def prefetch_ltx2_stage2_after_stage1(self) -> None:
+        self._ltx2_residency.prefetch_stage2_after_stage1()
+
+    def prepare_ltx2_upsample_after_stage1(self) -> bool:
+        return self._ltx2_residency.prepare_upsample_after_stage1()
 
     def _get_stage_distilled_lora_strength(
         self, phase: str, batch: Req | None
@@ -1040,7 +1055,7 @@ class LTX2TwoStagePipeline(_BaseLTX2Pipeline):
         if phase_signature == self._active_lora_signature:
             return
 
-        if self._device_manager.enter_phase(
+        if self._ltx2_residency.enter_phase(
             phase
         ) and self._can_short_circuit_lora_switch(phase, batch):
             self._active_lora_phase = phase

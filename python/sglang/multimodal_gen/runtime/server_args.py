@@ -74,7 +74,7 @@ logger = init_logger(__name__)
 WAN_LAYERWISE_OFFLOAD_AUTO_DISABLE_MEM_GB = 130
 LTX2_TWO_STAGE_DEVICE_MODES = ("original", "snapshot", "resident")
 LTX2_TWO_STAGE_PIPELINE_NAMES = ("LTX2TwoStagePipeline", "LTX2TwoStageHQPipeline")
-COMPONENT_RESIDENCY_MANAGER_MODES = ("disabled", "static", "dynamic")
+COMPONENT_RESIDENCY_MANAGER_MODES = ("disabled", "static")
 # H200-class GPUs (>=130 GiB total) can usually keep both LTX2 DiTs resident.
 LTX2_RESIDENT_AUTO_ENABLE_MEM_GB = 130
 
@@ -196,7 +196,6 @@ class ServerArgs(DisaggArgsMixin):
     pin_cpu_memory: bool = True
     ltx2_two_stage_device_mode: str | None = None
     component_residency_manager: str = "static"
-    component_residency_dynamic_budget: bool = False
     component_residency_trace: bool = False
 
     # ComfyUI integration
@@ -1009,19 +1008,8 @@ class ServerArgs(DisaggArgsMixin):
             default=ServerArgs.component_residency_manager,
             help=(
                 "Component residency scheduler mode. 'static' is the default path and "
-                "follows existing offload flags and declared use-sites, 'dynamic' may "
-                "keep additional components resident when the dynamic budget gate "
-                "allows it, and 'disabled' is an explicit legacy fallback."
-            ),
-        )
-        parser.add_argument(
-            "--component-residency-dynamic-budget",
-            action=StoreBoolean,
-            default=ServerArgs.component_residency_dynamic_budget,
-            help=(
-                "Allow the component residency manager to keep offloaded components "
-                "resident when current free VRAM appears sufficient. Only active with "
-                "--component-residency-manager dynamic."
+                "follows existing offload flags and declared use-sites; 'disabled' "
+                "is an explicit legacy fallback."
             ),
         )
         parser.add_argument(
@@ -1384,8 +1372,6 @@ class ServerArgs(DisaggArgsMixin):
                 "component_residency_manager must be one of "
                 f"{COMPONENT_RESIDENCY_MANAGER_MODES}, got {self.component_residency_manager!r}"
             )
-        if self.component_residency_manager != "dynamic":
-            self.component_residency_dynamic_budget = False
 
         # validate dit_offload_prefetch_size
         if self.dit_offload_prefetch_size > 1 and (

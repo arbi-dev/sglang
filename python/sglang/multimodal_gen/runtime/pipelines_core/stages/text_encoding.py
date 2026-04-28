@@ -13,10 +13,7 @@ import torch
 
 from sglang.multimodal_gen.configs.models.encoders import BaseEncoderOutput
 from sglang.multimodal_gen.runtime.distributed import get_local_torch_device
-from sglang.multimodal_gen.runtime.managers.component_manager import (
-    ComponentUse,
-    FORWARD_ACCESS,
-)
+from sglang.multimodal_gen.runtime.managers.component_manager import ComponentUse
 from sglang.multimodal_gen.runtime.managers.forward_context import set_forward_context
 from sglang.multimodal_gen.runtime.pipelines_core.schedule_batch import Req
 from sglang.multimodal_gen.runtime.pipelines_core.stages.base import PipelineStage
@@ -161,7 +158,6 @@ class TextEncodingStage(PipelineStage):
                 if encoder_index == 0
                 else f"text_encoder_{encoder_index + 1}"
             ),
-            access_kind=FORWARD_ACCESS,
             preferred_ready_after_request=encoder_index == 0,
         )
         manager.before_use(use)

@@ -2,7 +2,7 @@ import torch
 from diffusers.utils.torch_utils import randn_tensor
 
 from sglang.multimodal_gen.configs.pipeline_configs.ltx_2 import is_ltx23_native_variant
-from sglang.multimodal_gen.runtime.managers.component_manager import DIT_SWITCH_GROUP
+from sglang.multimodal_gen.runtime.managers.component_manager import DIT_HANDOFF_SLOT
 from sglang.multimodal_gen.runtime.pipelines_core.diffusion_scheduler_utils import (
     clone_scheduler_runtime,
 )
@@ -84,7 +84,7 @@ class LTX2AVDenoisingStage(LTX2DenoisingStage):
             batch.audio_latents = audio_latents
 
         if self._component_residency_manager is not None:
-            self._component_residency_manager.finish_switch_group(DIT_SWITCH_GROUP)
+            self._component_residency_manager.finish_handoff_slot(DIT_HANDOFF_SLOT)
 
 
 class LTX2RefinementStage(LTX2AVDenoisingStage):

@@ -20,16 +20,12 @@ class LTX2LoRAPipeline(Protocol):
         ...
 
 
-class LTX2UpsampleDeviceManager(Protocol):
-    def prepare_upsample_after_stage1(self) -> bool:
-        ...
-
-    def prefetch_stage2_after_stage1(self) -> None:
-        ...
-
-
 class LTX2UpsamplePipeline(Protocol):
-    _device_manager: LTX2UpsampleDeviceManager | None
+    def prepare_ltx2_upsample_after_stage1(self) -> bool:
+        ...
+
+    def prefetch_ltx2_stage2_after_stage1(self) -> None:
+        ...
 
 
 class LTX2HalveResolutionStage(PipelineStage):
@@ -153,18 +149,15 @@ class LTX2UpsampleStage(PipelineStage):
 
     def forward(self, batch: Req, server_args: ServerArgs) -> Req:
         delay_stage2_prefetch = False
-        device_manager = (
-            self.pipeline._device_manager if self.pipeline is not None else None
-        )
-        if device_manager is not None:
-            delay_stage2_prefetch = device_manager.prepare_upsample_after_stage1()
-        if device_manager is not None and not delay_stage2_prefetch:
-            device_manager.prefetch_stage2_after_stage1()
+        if self.pipeline is not None:
+            delay_stage2_prefetch = self.pipeline.prepare_ltx2_upsample_after_stage1()
+        if self.pipeline is not None and not delay_stage2_prefetch:
+            self.pipeline.prefetch_ltx2_stage2_after_stage1()
 
         device = get_local_torch_device()
         latents = self._upsample_video_latents(batch.latents, server_args, device)
-        if device_manager is not None and delay_stage2_prefetch:
-            device_manager.prefetch_stage2_after_stage1()
+        if self.pipeline is not None and delay_stage2_prefetch:
+            self.pipeline.prefetch_ltx2_stage2_after_stage1()
         logger.info("Upsampled video latents: %s", list(latents.shape))
         self._restore_full_resolution(batch)
         batch.image_latent = None

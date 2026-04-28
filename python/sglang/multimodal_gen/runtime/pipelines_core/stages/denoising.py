@@ -62,8 +62,7 @@ from sglang.multimodal_gen.runtime.loader.component_loaders.transformer_loader i
 )
 from sglang.multimodal_gen.runtime.managers.component_manager import (
     ComponentUse,
-    DIT_FORWARD_ACCESS,
-    DIT_SWITCH_GROUP,
+    DIT_HANDOFF_SLOT,
 )
 from sglang.multimodal_gen.runtime.managers.forward_context import set_forward_context
 from sglang.multimodal_gen.runtime.pipelines_core.schedule_batch import Req
@@ -950,7 +949,7 @@ class DenoisingStage(PipelineStage, RolloutDenoisingMixin):
             )
 
         if self._component_residency_manager is not None:
-            self._component_residency_manager.finish_switch_group(DIT_SWITCH_GROUP)
+            self._component_residency_manager.finish_handoff_slot(DIT_HANDOFF_SLOT)
 
     def _preprocess_sp_latents(self, batch: Req, server_args: ServerArgs):
         """Shard latents for Sequence Parallelism if applicable."""
@@ -1043,11 +1042,10 @@ class DenoisingStage(PipelineStage, RolloutDenoisingMixin):
         use = ComponentUse(
             stage_name=manager.state.stage_name or self.__class__.__name__,
             component_name=component_name,
-            access_kind=DIT_FORWARD_ACCESS,
             phase=phase,
             preferred_ready_after_request=component_name == "transformer",
         )
-        manager.switch_use(use, switch_group=DIT_SWITCH_GROUP)
+        manager.switch_use(use, handoff_slot=DIT_HANDOFF_SLOT)
 
     def _select_and_manage_model(
         self,

@@ -1,24 +1,19 @@
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Mapping, Protocol, Sequence
+from typing import Mapping, MutableMapping, Protocol, Sequence
 
 import torch.nn as nn
 
 from sglang.multimodal_gen.runtime.distributed import get_local_torch_device
 from sglang.multimodal_gen.runtime.managers.layerwise_offload import OffloadableDiTMixin
-from sglang.multimodal_gen.runtime.platforms import current_platform
 from sglang.multimodal_gen.runtime.server_args import ServerArgs
 from sglang.multimodal_gen.runtime.utils.logging_utils import init_logger
 
 logger = init_logger(__name__)
 
-# access kind
-FORWARD_ACCESS = "forward"
-DIT_FORWARD_ACCESS = "dit_forward"
-
-# local switch groups for sequential active-use handoff
-DIT_SWITCH_GROUP = "dit"
-MOVA_VIDEO_DIT_SWITCH_GROUP = "mova_video_dit"
+# local handoff slots for sequential active-use handoff
+DIT_HANDOFF_SLOT = "dit"
+MOVA_VIDEO_DIT_HANDOFF_SLOT = "mova_video_dit"
 
 
 @dataclass(slots=True)
@@ -29,8 +24,6 @@ class ComponentUse:
     stage_name: str
     # Pipeline module key: transformer / video_dit / text_encoder / ...
     component_name: str
-    # Operation kind, mainly for tracing and switch-group defaults.
-    access_kind: str = FORWARD_ACCESS
     # Model-specific phase for sequential components, e.g. stage1 or stage2.
     phase: str | None = None
     # Whether the manager may prepare this component for the next request.
@@ -53,7 +46,6 @@ class ResidencyState:
     future_uses: tuple[ComponentUse, ...] = ()
     batch_is_warmup: bool = False
     manager_mode: str = "static"
-    dynamic_budget: bool = False
     trace_enabled: bool = False
 
 
@@ -68,20 +60,10 @@ class ComponentResidencyStage(Protocol):
         ...
 
 
-class ComponentResidencyStrategyProvider(Protocol):
-    should_use_premerged: bool
-
-    def strategy_for_component(
-        self, component_name: str
-    ) -> "ComponentResidencyStrategy":
-        ...
-
-
 class ComponentResidencyPipeline(Protocol):
     modules: Mapping[str, object]
-    memory_usages: Mapping[str, float]
     _stage_name_mapping: Mapping[str, ComponentResidencyStage]
-    _device_manager: ComponentResidencyStrategyProvider | None
+    component_residency_strategies: MutableMapping[str, "ComponentResidencyStrategy"]
 
 
 class ComponentResidencyStrategy:
@@ -286,7 +268,7 @@ class ComponentResidencyManager:
         before usage: make the required component ready at its use-site.
         after usage: finish or keep the component after a use-site.
         after stage: finish declared stage uses and optionally prefetch the next stage.
-        finish request: finish active switch groups and schedule preferred next-request prefetch.
+        finish request: finish active handoff slots and schedule preferred next-request prefetch.
 
     The manager instance is global and rebound to the active pipeline before request execution.
     """
@@ -298,20 +280,22 @@ class ComponentResidencyManager:
         self.server_args = server_args
         self.state = ResidencyState(
             manager_mode=server_args.component_residency_manager,
-            dynamic_budget=server_args.component_residency_dynamic_budget,
             trace_enabled=server_args.component_residency_trace,
         )
         self._stage_names_by_id: dict[int, str] = {}
         self._stage_uses_by_index: list[tuple[ComponentUse, ...]] = []
-        # marks the active use of a switch group
-        # a switch group is a local handoff domain for sequential components,
+        self._custom_strategies: dict[str, ComponentResidencyStrategy] = dict(
+            pipeline.component_residency_strategies
+        )
+        # marks the active use of a handoff slot
+        # a handoff slot is a local handoff domain for sequential components,
         # e.g. transformer_1 and transformer_2.
-        # if a `switch_use` is called within a same switch group, manager will try to:
+        # if a `switch_use` is called within a same handoff slot, manager will try to:
         # 1. finish prev active use
         # 2. prepare/wait for next use
         # 3. make active
-        # while for cross-switch-group components, manager doesn't handle them internally now
-        self._active_uses_by_switch_group: dict[str, ComponentUse] = {}
+        # while for cross-handoff-slot components, manager doesn't handle them internally now
+        self._active_uses_by_handoff_slot: dict[str, ComponentUse] = {}
         self._uses_seen: dict[str, ComponentUse] = {}
 
     @property
@@ -319,11 +303,15 @@ class ComponentResidencyManager:
         return self.server_args.component_residency_manager != "disabled"
 
     def refresh_pipeline(self, pipeline: ComponentResidencyPipeline) -> None:
+        custom_strategies = dict(pipeline.component_residency_strategies)
         if pipeline is not self.pipeline:
             self.strategy_for.cache_clear()
-            self._active_uses_by_switch_group.clear()
+            self._active_uses_by_handoff_slot.clear()
             self._uses_seen.clear()
+        elif custom_strategies != self._custom_strategies:
+            self.strategy_for.cache_clear()
         self.pipeline = pipeline
+        self._custom_strategies = custom_strategies
         self._stage_names_by_id = {
             id(stage): name for name, stage in pipeline._stage_name_mapping.items()
         }
@@ -332,6 +320,13 @@ class ComponentResidencyManager:
         if server_args is not self.server_args:
             self.strategy_for.cache_clear()
         self.server_args = server_args
+
+    def register_strategy(
+        self, component_name: str, strategy: ComponentResidencyStrategy
+    ) -> None:
+        self.pipeline.component_residency_strategies[component_name] = strategy
+        self._custom_strategies[component_name] = strategy
+        self.strategy_for.cache_clear()
 
     def begin_request(
         self,
@@ -345,10 +340,9 @@ class ComponentResidencyManager:
             stages=stages,
             batch_is_warmup=batch.is_warmup,
             manager_mode=server_args.component_residency_manager,
-            dynamic_budget=server_args.component_residency_dynamic_budget,
             trace_enabled=server_args.component_residency_trace,
         )
-        self._active_uses_by_switch_group.clear()
+        self._active_uses_by_handoff_slot.clear()
         self._uses_seen.clear()
         if self.enabled:
             self._stage_uses_by_index = [
@@ -398,14 +392,14 @@ class ComponentResidencyManager:
             return
         self._prefetch_use(use)
 
-    def switch_use(self, use: ComponentUse, switch_group: str | None = None) -> None:
-        """Switch an explicit intra-stage use-site.
+    def switch_use(self, use: ComponentUse, handoff_slot: str | None = None) -> None:
+        """Trigger an explicit intra-stage use-site change. (e.g., dual-dit in denoising stage)
 
         This path always enforces readiness; disabled mode only disables
         cross-stage scheduling, not required intra-stage component switching.
         """
-        key = switch_group or use.access_kind or use.component_name
-        prev_active_use = self._active_uses_by_switch_group.get(key)
+        key = handoff_slot or use.component_name
+        prev_active_use = self._active_uses_by_handoff_slot.get(key)
         if prev_active_use is not None and self._same_use(prev_active_use, use):
             return
         if prev_active_use is not None:
@@ -413,11 +407,11 @@ class ComponentResidencyManager:
             self._finish_use(prev_active_use, keep_on_warmup=False)
         # prepare for the upcoming use
         self._prepare_forward_use(use)
-        self._active_uses_by_switch_group[key] = use
+        self._active_uses_by_handoff_slot[key] = use
 
-    def finish_switch_group(self, switch_group: str) -> None:
-        """Finish the current explicit intra-stage use-site for a switch group."""
-        active_use = self._active_uses_by_switch_group.pop(switch_group, None)
+    def finish_handoff_slot(self, handoff_slot: str) -> None:
+        """Finish the current explicit intra-stage use-site for a handoff slot."""
+        active_use = self._active_uses_by_handoff_slot.pop(handoff_slot, None)
         if active_use is not None:
             self._finish_use(active_use, keep_on_warmup=False)
 
@@ -482,27 +476,24 @@ class ComponentResidencyManager:
         if (
             not self.enabled
             and not self._uses_seen
-            and not self._active_uses_by_switch_group
+            and not self._active_uses_by_handoff_slot
         ):
             return
-        for switch_group in tuple(self._active_uses_by_switch_group):
-            self.finish_switch_group(switch_group)
+        for handoff_slot in tuple(self._active_uses_by_handoff_slot):
+            self.finish_handoff_slot(handoff_slot)
         preferred_uses = self._preferred_request_end_uses()
         for component_name, use in list(self._uses_seen.items()):
             module = self.get_module(component_name)
             if module is None:
                 continue
             preferred = component_name in preferred_uses
-            if not preferred and (
-                self._should_keep_single_dit(component_name)
-                or self._should_keep_for_dynamic_budget(component_name)
-            ):
+            if not preferred and self._should_keep_single_dit(component_name):
                 self._trace(
                     "keep",
                     use,
                     self.strategy_for(component_name, module),
                     module,
-                    detail="single_dit_or_dynamic_budget",
+                    detail="single_dit",
                 )
                 continue
             strategy = self.strategy_for(component_name, module)
@@ -546,18 +537,12 @@ class ComponentResidencyManager:
         self, component_name: str, module: nn.Module
     ) -> ComponentResidencyStrategy:
         """Return the strategy for a specific component"""
-        device_manager = self.pipeline._device_manager
-        if (
-            component_name in ("transformer", "transformer_2")
-            and device_manager is not None
-            and device_manager.should_use_premerged
-        ):
-            strategy = device_manager.strategy_for_component(component_name)
-        else:
-            strategy = build_component_residency_strategy(
-                component_name, module, self.server_args
-            )
-        return strategy
+        custom_strategy = self._custom_strategies.get(component_name)
+        if custom_strategy is not None:
+            return custom_strategy
+        return build_component_residency_strategy(
+            component_name, module, self.server_args
+        )
 
     def _stage_uses(self, stage_index: int) -> tuple[ComponentUse, ...]:
         """Returns the ComponentUse(s) of a specific stage"""
@@ -585,27 +570,13 @@ class ComponentResidencyManager:
             return True
         if self._should_keep_single_dit(use.component_name):
             return True
-        return self._should_keep_for_dynamic_budget(use.component_name)
+        return False
 
     def _should_keep_single_dit(self, component_name: str) -> bool:
         modules = self.pipeline.modules
-        return (
-            component_name == "transformer"
-            and "transformer_2" not in modules
-            and self.pipeline._device_manager is None
-        ) or (component_name == "video_dit" and "video_dit_2" not in modules)
-
-    def _should_keep_for_dynamic_budget(self, component_name: str) -> bool:
-        if (
-            self.state.manager_mode != "dynamic"
-            or not self.state.dynamic_budget
-            or not current_platform.is_cuda()
-        ):
-            return False
-        memory_usage = self.pipeline.memory_usages.get(component_name)
-        if memory_usage is None:
-            return False
-        return memory_usage + 2.0 < current_platform.get_available_gpu_memory()
+        return (component_name == "transformer" and "transformer_2" not in modules) or (
+            component_name == "video_dit" and "video_dit_2" not in modules
+        )
 
     def _preferred_request_end_use(self) -> ComponentUse | None:
         for uses in self._stage_uses_by_index:
@@ -635,11 +606,7 @@ class ComponentResidencyManager:
 
     @staticmethod
     def _same_use(lhs: ComponentUse, rhs: ComponentUse) -> bool:
-        return (
-            lhs.component_name == rhs.component_name
-            and lhs.access_kind == rhs.access_kind
-            and lhs.phase == rhs.phase
-        )
+        return lhs.component_name == rhs.component_name and lhs.phase == rhs.phase
 
     def _trace(
         self,
@@ -658,14 +625,13 @@ class ComponentResidencyManager:
         device = self._module_device(module)
         logger.info(
             "[component_residency] action=%s stage=%s next_stage=%s component=%s "
-            "strategy=%s phase=%s access=%s device=%s warmup=%s mode=%s %s",
+            "strategy=%s phase=%s device=%s warmup=%s mode=%s %s",
             action,
             self.state.stage_name,
             self.state.next_stage_name,
             component_name,
             strategy.name if strategy is not None else None,
             use.phase if use is not None else None,
-            use.access_kind if use is not None else None,
             device,
             self.state.batch_is_warmup,
             self.state.manager_mode,
