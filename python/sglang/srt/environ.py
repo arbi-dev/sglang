@@ -486,10 +486,6 @@ class Envs:
     SGLANG_MAMBA_CONV_DTYPE = EnvStr("bfloat16")
     SGLANG_MAMBA_SSM_DTYPE = EnvStr(None)
 
-    # DSv4 / MTP HC hidden-size fix
-    SGLANG_DSV4_MODE = EnvStr("2604")
-    SGLANG_FIX_MTP_HC_HIDDEN = EnvBool(True)
-
     # Unified Radix Tree
     SGLANG_ENABLE_UNIFIED_RADIX_TREE = EnvBool(False)
 
