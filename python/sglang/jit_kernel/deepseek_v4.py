@@ -120,6 +120,17 @@ def _jit_hash_topk_module() -> Module:
 
 
 @cache_once
+def _jit_hash_topk_v2_module(input_id_dtype: torch.dtype) -> Module:
+    args = make_cpp_args(input_id_dtype, "act_sqrt_softplus", is_arch_support_pdl())
+    return load_jit(
+        make_name("hash_topk_v2"),
+        *args,
+        cuda_files=["deepseek_v4/hash_topk_v2.cuh"],
+        cuda_wrappers=[("hash_topk", f"HashTopKKernel<{args}>::run")],
+    )
+
+
+@cache_once
 def _jit_compress_module(
     head_dim: int,
     dtype_in: torch.dtype,
@@ -417,7 +428,10 @@ def hash_topk(
     topk_weights = torch.empty(
         (num_tokens, topk_fused), dtype=torch.float32, device=router_logits.device
     )
-    module = _jit_hash_topk_module()
+    if envs.SGLANG_FIX_HASH_TOPK_DTYPE.get():
+        module = _jit_hash_topk_v2_module(input_ids.dtype)
+    else:
+        module = _jit_hash_topk_module()
     module.hash_topk(
         router_logits,
         input_ids,
