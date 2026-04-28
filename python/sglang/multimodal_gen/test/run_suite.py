@@ -19,15 +19,11 @@ from pathlib import Path
 
 import tabulate
 
-DIFFUSION_UTILS_DIR = (
-    Path(__file__).resolve().parents[5] / "scripts" / "ci" / "utils" / "diffusion"
-)
-if str(DIFFUSION_UTILS_DIR) not in sys.path:
-    sys.path.insert(0, str(DIFFUSION_UTILS_DIR))
-
-from partitioning import PartitionItem, partition_items_by_lpt
-
 from sglang.multimodal_gen.runtime.utils.logging_utils import init_logger
+from sglang.multimodal_gen.test.partitioning import (
+    PartitionItem,
+    partition_items_by_lpt,
+)
 from sglang.multimodal_gen.test.server.gpu_cases import (
     ONE_GPU_CASES,
     TWO_GPU_CASES,

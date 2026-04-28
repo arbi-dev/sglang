@@ -7,6 +7,7 @@ AST parsing to extract parametrized cases plus standalone files from source.
 """
 
 import argparse
+import importlib.util
 import json
 import math
 import os
@@ -20,7 +21,21 @@ from diffusion_case_parser import (
     collect_diffusion_suites,
     resolve_case_config_path,
 )
-from partitioning import PartitionItem, partition_items_by_lpt
+
+
+def _load_partitioning_helpers():
+    repo_root = Path(__file__).resolve().parents[4]
+    helper_path = repo_root / "python/sglang/multimodal_gen/test/partitioning.py"
+    spec = importlib.util.spec_from_file_location(
+        "diffusion_test_partitioning", helper_path
+    )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module.PartitionItem, module.partition_items_by_lpt
+
+
+PartitionItem, partition_items_by_lpt = _load_partitioning_helpers()
 
 SUITE_OUTPUT_NAMES = {"1-gpu": "1gpu", "2-gpu": "2gpu"}
 DEFAULT_STANDALONE_EST_TIME_SECONDS = 300.0
