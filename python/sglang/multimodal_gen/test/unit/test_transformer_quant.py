@@ -139,15 +139,11 @@ class TestTransformerQuantHelpers(unittest.TestCase):
             )
 
         self.assertEqual(resolved, [shard])
-        mock_download.assert_called_once_with(
-            tmpdir, validate_safetensors_shards=True
-        )
+        mock_download.assert_called_once_with(tmpdir, validate_safetensors_shards=True)
 
     def test_maybe_download_model_redownloads_incomplete_component_snapshot(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            snapshot_dir = os.path.join(
-                tmpdir, "models--org--repo", "snapshots", "abc"
-            )
+            snapshot_dir = os.path.join(tmpdir, "models--org--repo", "snapshots", "abc")
             index_name = "diffusion_pytorch_model.safetensors.index.json"
             shard_name = "diffusion_pytorch_model-00001-of-00001.safetensors"
 
