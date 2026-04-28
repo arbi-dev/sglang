@@ -326,11 +326,9 @@ class TokenizerLoader(ComponentLoader):
         ):
             return AutoProcessor.from_pretrained(component_model_path)
 
-        use_fast = not (
-            self.component_architecture is not None
-            and self.component_architecture.endswith("Tokenizer")
-            and not self.component_architecture.endswith("Fast")
-        )
+        # Qwen-Image's model_index declares Qwen2Tokenizer; using the fast class
+        # changes text preprocessing and shifts official GT comparisons.
+        use_fast = self.component_architecture != "Qwen2Tokenizer"
         return AutoTokenizer.from_pretrained(
             component_model_path,
             padding_side="right",

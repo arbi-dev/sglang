@@ -208,7 +208,11 @@ class QwenImagePipelineConfig(QwenImageRolloutPipelineMixin, ImagePipelineConfig
             if batch.true_cfg_scale is not None
             else batch.guidance_scale
         )
-        if cfg_scale <= 1.0 or not batch.do_classifier_free_guidance:
+        if (
+            cfg_scale is None
+            or cfg_scale <= 1.0
+            or not batch.do_classifier_free_guidance
+        ):
             return noise_pred
 
         cond_norm = torch.norm(noise_pred_cond, dim=-1, keepdim=True)

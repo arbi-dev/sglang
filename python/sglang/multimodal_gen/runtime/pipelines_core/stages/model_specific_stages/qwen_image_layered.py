@@ -447,7 +447,7 @@ the image\n<|vision_start|><|image_pad|><|vision_end|><|im_end|>\n<|im_start|>as
         image = image.to(dtype=torch.bfloat16)
 
         prompt = batch.prompt
-        if prompt is None or prompt == "" or prompt == " ":
+        if not prompt or prompt.isspace():
             prompt = self.get_image_caption(
                 prompt_image, use_en_prompt=use_en_prompt, device=device
             )
