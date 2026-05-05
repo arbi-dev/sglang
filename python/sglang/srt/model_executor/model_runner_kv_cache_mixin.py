@@ -328,6 +328,18 @@ class ModelRunnerKVCacheMixin:
         is_nsa_model = is_deepseek_nsa(self.model_config.hf_config)
         is_dsv4_model = is_deepseek_v4(self.model_config.hf_config)
 
+        # Plugin KV-cache dtypes (see :mod:`sglang.srt.plugins.kv_cache`)
+        # provide a pool_factory that fully owns pool construction. If
+        # the user selected a registered plugin name, build the pool
+        # from the factory and skip the built-in dispatch below.
+        from sglang.srt.plugins import kv_cache as _plugin_kv
+
+        if _plugin_kv.is_registered(self.server_args.kv_cache_dtype):
+            self.token_to_kv_pool = _plugin_kv.build_pool(
+                self.server_args.kv_cache_dtype, self
+            )
+            return
+
         # Out-of-tree platform plugin system — used by elif below
         from sglang.srt.platforms import current_platform
 
