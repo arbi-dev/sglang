@@ -2208,6 +2208,23 @@ class ModelRunner(ModelRunnerKVCacheMixin):
         return result[1] if result else None
 
     def configure_kv_cache_dtype(self):
+        # Plugin KV-cache dtypes (see :mod:`sglang.srt.plugins.kv_cache`)
+        # bind a name → torch storage dtype mapping. If the user
+        # selected a registered plugin name, use that storage dtype and
+        # skip the built-in dispatch.
+        from sglang.srt.plugins import kv_cache as _plugin_kv
+
+        if _plugin_kv.is_registered(self.server_args.kv_cache_dtype):
+            self.kv_cache_dtype = _plugin_kv.get_torch_dtype(
+                self.server_args.kv_cache_dtype
+            )
+            log_info_on_rank0(
+                logger,
+                f"Using plugin KV cache dtype: {self.server_args.kv_cache_dtype} "
+                f"(storage={self.kv_cache_dtype})",
+            )
+            return
+
         if self.server_args.kv_cache_dtype == "auto":
             quant_config = getattr(self.model, "quant_config", None)
             kv_cache_quant_algo = getattr(quant_config, "kv_cache_quant_algo", None)
