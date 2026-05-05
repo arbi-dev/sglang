@@ -475,6 +475,19 @@ class ModelRunnerKVCacheMixin:
 
         # Initialize token_to_kv_pool
         is_nsa_model = is_deepseek_nsa(self.model_config.hf_config)
+
+        # Plugin KV-cache dtypes (see :mod:`sglang.srt.plugins.kv_cache`)
+        # provide a pool_factory that fully owns pool construction. If
+        # the user selected a registered plugin name, build the pool
+        # from the factory and skip the built-in dispatch below.
+        from sglang.srt.plugins import kv_cache as _plugin_kv
+
+        if _plugin_kv.is_registered(self.server_args.kv_cache_dtype):
+            self.token_to_kv_pool = _plugin_kv.build_pool(
+                self.server_args.kv_cache_dtype, self
+            )
+            return
+
         if self.server_args.attention_backend == "ascend" and not self.mambaish_config:
             if self.is_hybrid_swa:
                 from sglang.srt.hardware_backend.npu.memory_pool_npu import (
