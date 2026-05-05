@@ -286,19 +286,20 @@ class ModelRunnerKVCacheMixin:
         # Plugin KV-cache dtypes (see :mod:`sglang.srt.plugins.kv_cache`)
         # provide a pool_factory that fully owns pool construction. If
         # the user selected a registered plugin name, build the pool
-        # from the factory and skip the built-in dispatch below.
+        # from the factory and skip the built-in dispatch below — but
+        # NOT the allocator wiring that follows it.
+        from sglang.srt.platforms import current_platform
         from sglang.srt.plugins import kv_cache as _plugin_kv
 
-        if _plugin_kv.is_registered(self.server_args.kv_cache_dtype):
+        _plugin_pool_used = _plugin_kv.is_registered(
+            self.server_args.kv_cache_dtype
+        )
+        if _plugin_pool_used:
             self.token_to_kv_pool = _plugin_kv.build_pool(
                 self.server_args.kv_cache_dtype, self
             )
-            return
-
-        # Check out-of-tree platform (plugin system) first
-        from sglang.srt.platforms import current_platform
-
-        if current_platform.is_out_of_tree() and not self.mambaish_config:
+        # Check out-of-tree platform (plugin system) next
+        elif current_platform.is_out_of_tree() and not self.mambaish_config:
             if self.use_mla_backend and is_nsa_model:
                 PoolCls = current_platform.get_nsa_kv_pool_cls()
                 self.token_to_kv_pool = PoolCls(
