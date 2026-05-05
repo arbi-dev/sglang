@@ -152,6 +152,15 @@ ATTENTION_BACKEND_CHOICES = [
     "intel_xpu",
 ]
 
+KV_CACHE_DTYPE_CHOICES = [
+    "auto",
+    "fp8_e5m2",
+    "fp8_e4m3",
+    "bf16",
+    "bfloat16",
+    "fp4_e2m1",
+]
+
 DETERMINISTIC_ATTENTION_BACKEND_CHOICES = ["flashinfer", "fa3", "triton"]
 
 RADIX_SUPPORTED_DETERMINISTIC_ATTENTION_BACKEND = ["fa3", "triton"]
@@ -251,6 +260,18 @@ def add_quantization_method_choices(choices):
 
 def add_attention_backend_choices(choices):
     ATTENTION_BACKEND_CHOICES.extend(choices)
+
+
+def add_kv_cache_dtype_choices(choices):
+    """Extend the ``--kv-cache-dtype`` argparse choices at runtime.
+
+    Mirror of :func:`add_attention_backend_choices` for plugin-registered
+    KV cache dtypes. Plugins that register a new dtype via
+    :func:`sglang.srt.plugins.kv_cache.register` should call this
+    function before ``ServerArgs`` argparse is built so the new name is
+    accepted at parse time.
+    """
+    KV_CACHE_DTYPE_CHOICES.extend(choices)
 
 
 def add_deterministic_attention_backend_choices(choices):
@@ -4323,8 +4344,8 @@ class ServerArgs:
             "--kv-cache-dtype",
             type=str,
             default=ServerArgs.kv_cache_dtype,
-            choices=["auto", "fp8_e5m2", "fp8_e4m3", "bf16", "bfloat16", "fp4_e2m1"],
-            help='Data type for kv cache storage. "auto" will use model data type. "bf16" or "bfloat16" for BF16 KV cache. "fp8_e5m2" and "fp8_e4m3" are supported for CUDA 11.8+. "fp4_e2m1" (only mxfp4) is supported for CUDA 12.8+ and PyTorch 2.8.0+',
+            choices=KV_CACHE_DTYPE_CHOICES,
+            help='Data type for kv cache storage. "auto" will use model data type. "bf16" or "bfloat16" for BF16 KV cache. "fp8_e5m2" and "fp8_e4m3" are supported for CUDA 11.8+. "fp4_e2m1" (only mxfp4) is supported for CUDA 12.8+ and PyTorch 2.8.0+. Plugins may add additional values via add_kv_cache_dtype_choices().',
         )
         parser.add_argument(
             "--enable-fp32-lm-head",

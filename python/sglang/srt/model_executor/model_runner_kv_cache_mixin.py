@@ -283,10 +283,30 @@ class ModelRunnerKVCacheMixin:
         # Initialize token_to_kv_pool
         is_nsa_model = is_deepseek_nsa(self.model_config.hf_config)
 
-        # Check out-of-tree platform (plugin system) first
+        # Check the kv_cache_dtype plugin registry first: out-of-tree
+        # backends (e.g. quantized / bit-packed pools) registered via
+        # sglang.srt.plugins.kv_cache.register own pool construction
+        # end-to-end and take priority over the built-in MHA/MLA/SWA
+        # cascade below. Falls through to the cascade for built-in
+        # dtypes (auto/bf16/fp8/fp4) and unregistered names.
+        from sglang.srt.plugins.kv_cache import get_pool_factory as _plugin_pool_factory
+
+        _plugin_factory = _plugin_pool_factory(self.server_args.kv_cache_dtype)
+        plugin_pool_handled = _plugin_factory is not None
+        if plugin_pool_handled:
+            self.token_to_kv_pool = _plugin_factory(self)
+            logger.info(
+                "kv_cache_dtype=%r resolved via plugin registry (%s)",
+                self.server_args.kv_cache_dtype,
+                type(self.token_to_kv_pool).__name__,
+            )
+
+        # Check out-of-tree platform (plugin system) next
         from sglang.srt.platforms import current_platform
 
-        if current_platform.is_out_of_tree() and not self.mambaish_config:
+        if plugin_pool_handled:
+            pass  # already populated above; skip the built-in cascade
+        elif current_platform.is_out_of_tree() and not self.mambaish_config:
             if self.use_mla_backend and is_nsa_model:
                 PoolCls = current_platform.get_nsa_kv_pool_cls()
                 self.token_to_kv_pool = PoolCls(

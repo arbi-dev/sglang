@@ -2175,9 +2175,19 @@ class ModelRunner(ModelRunnerKVCacheMixin):
                 )
                 self.kv_cache_dtype = self.dtype
         else:
-            raise ValueError(
-                f"Unsupported kv_cache_dtype: {self.server_args.kv_cache_dtype}."
-            )
+            # Fall back to the plugin registry so out-of-tree backends
+            # (registered via sglang.srt.plugins.kv_cache.register) can
+            # introduce custom KV-cache dtype strings without forking
+            # this branch.
+            from sglang.srt.plugins.kv_cache import get_torch_dtype
+
+            plugin_dtype = get_torch_dtype(self.server_args.kv_cache_dtype)
+            if plugin_dtype is not None:
+                self.kv_cache_dtype = plugin_dtype
+            else:
+                raise ValueError(
+                    f"Unsupported kv_cache_dtype: {self.server_args.kv_cache_dtype}."
+                )
 
         log_info_on_rank0(logger, f"Using KV cache dtype: {self.kv_cache_dtype}")
 
