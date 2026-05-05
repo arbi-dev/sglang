@@ -154,6 +154,22 @@ ATTENTION_BACKEND_CHOICES = [
 
 DETERMINISTIC_ATTENTION_BACKEND_CHOICES = ["flashinfer", "fa3", "triton"]
 
+# argparse choices for ``--kv-cache-dtype``. Plugins may extend at
+# import time via :func:`add_kv_cache_dtype_choices`. The runtime
+# selection logic in
+# :meth:`ModelRunner.configure_kv_cache_dtype` and
+# :meth:`ModelRunnerKVCacheMixin._init_pools` consults
+# :mod:`sglang.srt.plugins.kv_cache` to dispatch to the registered
+# torch dtype + pool factory for plugin-only names.
+KV_CACHE_DTYPE_CHOICES = [
+    "auto",
+    "fp8_e5m2",
+    "fp8_e4m3",
+    "bf16",
+    "bfloat16",
+    "fp4_e2m1",
+]
+
 RADIX_SUPPORTED_DETERMINISTIC_ATTENTION_BACKEND = ["fa3", "triton"]
 
 DISAGG_TRANSFER_BACKEND_CHOICES = ["mooncake", "nixl", "ascend", "fake", "mori"]
@@ -251,6 +267,10 @@ def add_quantization_method_choices(choices):
 
 def add_attention_backend_choices(choices):
     ATTENTION_BACKEND_CHOICES.extend(choices)
+
+
+def add_kv_cache_dtype_choices(choices):
+    KV_CACHE_DTYPE_CHOICES.extend(choices)
 
 
 def add_deterministic_attention_backend_choices(choices):
@@ -4323,8 +4343,8 @@ class ServerArgs:
             "--kv-cache-dtype",
             type=str,
             default=ServerArgs.kv_cache_dtype,
-            choices=["auto", "fp8_e5m2", "fp8_e4m3", "bf16", "bfloat16", "fp4_e2m1"],
-            help='Data type for kv cache storage. "auto" will use model data type. "bf16" or "bfloat16" for BF16 KV cache. "fp8_e5m2" and "fp8_e4m3" are supported for CUDA 11.8+. "fp4_e2m1" (only mxfp4) is supported for CUDA 12.8+ and PyTorch 2.8.0+',
+            choices=KV_CACHE_DTYPE_CHOICES,
+            help='Data type for kv cache storage. "auto" will use model data type. "bf16" or "bfloat16" for BF16 KV cache. "fp8_e5m2" and "fp8_e4m3" are supported for CUDA 11.8+. "fp4_e2m1" (only mxfp4) is supported for CUDA 12.8+ and PyTorch 2.8.0+. Plugins may extend this list via add_kv_cache_dtype_choices().',
         )
         parser.add_argument(
             "--enable-fp32-lm-head",
