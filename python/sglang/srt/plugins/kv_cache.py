@@ -42,7 +42,6 @@ import torch
 class _Entry:
     torch_dtype: torch.dtype
     pool_factory: Callable[[Any], Any]
-    paired_attention_backend: str | None
 
 
 _REGISTRY: dict[str, _Entry] = {}
@@ -53,7 +52,6 @@ def register(
     *,
     torch_dtype: torch.dtype,
     pool_factory: Callable[[Any], Any],
-    paired_attention_backend: str | None = None,
 ) -> None:
     """Register a plugin KV-cache dtype.
 
@@ -67,23 +65,11 @@ def register(
         pool_factory: ``(runner) -> token_to_kv_pool`` callable. Receives
             the partially-initialized :class:`ModelRunner` and returns
             the pool instance to assign to ``runner.token_to_kv_pool``.
-        paired_attention_backend: Optional name of the
-            :mod:`sglang.srt.plugins.attention` backend this dtype is
-            paired with. When set, ``--kv-cache-dtype <name>`` with no
-            ``--attention-backend`` auto-defaults to this backend, and
-            the reverse pair (``--attention-backend <paired>`` with
-            ``--kv-cache-dtype auto``) auto-defaults the dtype to this
-            ``name``. Set to ``None`` for plugins that don't bundle a
-            specific attention backend.
 
     Idempotent — re-registering the same ``name`` overrides the
     previous entry.
     """
-    _REGISTRY[name] = _Entry(
-        torch_dtype=torch_dtype,
-        pool_factory=pool_factory,
-        paired_attention_backend=paired_attention_backend,
-    )
+    _REGISTRY[name] = _Entry(torch_dtype=torch_dtype, pool_factory=pool_factory)
 
 
 def is_registered(name: str) -> bool:
@@ -112,34 +98,10 @@ def build_pool(name: str, runner: Any) -> Any:
     return _REGISTRY[name].pool_factory(runner)
 
 
-def get_paired_attention_backend(name: str) -> str | None:
-    """Return the paired attention-backend name for ``name``, or None.
-
-    Used by :mod:`sglang.srt.server_args` to bidirectionally auto-pair
-    ``--kv-cache-dtype`` and ``--attention-backend``.
-    """
-    return _REGISTRY[name].paired_attention_backend
-
-
-def find_dtype_paired_with_backend(backend_name: str) -> str | None:
-    """Return the kv-cache dtype name paired with ``backend_name``, or None.
-
-    Reverse lookup: returns the first registered dtype whose
-    ``paired_attention_backend`` equals ``backend_name``. None if no
-    plugin dtype is paired with that backend.
-    """
-    for dtype_name, entry in _REGISTRY.items():
-        if entry.paired_attention_backend == backend_name:
-            return dtype_name
-    return None
-
-
 __all__ = [
     "register",
     "is_registered",
     "registered_names",
     "get_torch_dtype",
     "build_pool",
-    "get_paired_attention_backend",
-    "find_dtype_paired_with_backend",
 ]
