@@ -91,6 +91,25 @@ class DraftBackendFactory:
             if self.server_args.speculative_attention_mode == "decode"
             else "prefill_attention_backend"
         )
+        # Out-of-tree plugin attention backends (e.g. a compressed-KV
+        # backend registered via sglang.srt.plugins.attention) supply
+        # their draft-extend backend by constructing the SAME backend on
+        # the draft model runner — draft extend is a normal prefill
+        # through that backend. Consult the plugin registry before the
+        # built-in map so plugins work with EAGLE/NEXTN without a
+        # hardcoded entry here.
+        from sglang.srt.plugins import attention as _plugin_attn
+
+        backend_type = (
+            self.draft_attn_backend
+            if self.draft_attn_backend
+            else getattr(self.server_args, backend_name)
+        )
+        if backend_type is None:
+            backend_type = self.server_args.attention_backend
+        if backend_type not in backend_map and _plugin_attn.is_registered(backend_type):
+            return _plugin_attn.ATTENTION_BACKENDS[backend_type](self.draft_model_runner)
+
         return self._create_backend(
             backend_name,
             backend_map,
